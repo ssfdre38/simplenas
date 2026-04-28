@@ -3,7 +3,16 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SimpleNAS - Modern NAS Management Panel</title>
+    <meta name="description" content="Modern, lightweight NAS management panel built with C# and ASP.NET Core. Sponsored by Barrer Software.">
+    <meta name="keywords" content="NAS, storage, ZFS, C#, ASP.NET Core, self-hosted, open source">
+    <meta property="og:title" content="SimpleNAS - Modern NAS Management Panel">
+    <meta property="og:description" content="Open-source NAS management solution with ZFS support, real-time monitoring, and modern web UI.">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://simplenas.dev">
+    <title>SimpleNAS - Modern NAS Management Panel | Sponsored by Barrer Software</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;800&display=swap" rel="stylesheet">
     <style>
         * {
             margin: 0;
@@ -11,12 +20,51 @@
             box-sizing: border-box;
         }
         
+        :root {
+            --primary: #667eea;
+            --primary-dark: #5568d3;
+            --secondary: #764ba2;
+            --accent: #f093fb;
+            --dark: #1a1a2e;
+            --dark-light: #16213e;
+            --text: #e4e4e4;
+            --text-muted: #a0a0a0;
+            --success: #10b981;
+            --warning: #f59e0b;
+        }
+        
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             line-height: 1.6;
-            color: #333;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: var(--text);
+            background: var(--dark);
             min-height: 100vh;
+        }
+        
+        /* Animated gradient background */
+        .hero {
+            position: relative;
+            overflow: hidden;
+            background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+            min-height: 100vh;
+        }
+        
+        .hero::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: 
+                radial-gradient(circle at 20% 50%, rgba(240, 147, 251, 0.1) 0%, transparent 50%),
+                radial-gradient(circle at 80% 80%, rgba(102, 126, 234, 0.1) 0%, transparent 50%);
+            animation: gradientShift 15s ease infinite;
+        }
+        
+        @keyframes gradientShift {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.8; }
         }
         
         .container {
