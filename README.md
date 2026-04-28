@@ -1,10 +1,16 @@
 # SimpleNAS
 
+[![Sponsored by Barrer Software](https://img.shields.io/badge/Sponsored_by-Barrer_Software-0A0E27?style=for-the-badge)](https://barrersoftware.com)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
+[![.NET](https://img.shields.io/badge/.NET-8.0-512BD4?style=for-the-badge&logo=dotnet)](https://dotnet.microsoft.com/)
+
 **Modern, lightweight NAS management panel built with C# and ASP.NET Core**
 
 SimpleNAS is an open-source Network Attached Storage (NAS) management solution designed for simplicity and performance. Built with C# ASP.NET Core, it provides a clean web interface for managing ZFS storage pools, monitoring system resources, and configuring network shares.
 
 🌐 **[simplenas.dev](https://simplenas.dev)**
+
+> **Enterprise Support:** Backed by [Barrer Software](https://barrersoftware.com) — Professional support, consulting, and managed hosting available.
 
 ## ✨ Features
 
@@ -135,10 +141,24 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
+## 🏢 Enterprise Support
+
+SimpleNAS is sponsored by **[Barrer Software](https://barrersoftware.com)** — a security and infrastructure software company.
+
+**Available Services:**
+- 🛠️ Professional support contracts
+- 📊 Custom feature development
+- 🏗️ Deployment consulting
+- ☁️ Managed hosting solutions
+- 🔒 Security hardening and compliance
+
+📧 Contact: [admin@barrersoftware.com](mailto:admin@barrersoftware.com)
+
 ## 🙏 Acknowledgments
 
 - Built with [ASP.NET Core](https://dotnet.microsoft.com/apps/aspnet)
 - ZFS on Linux by [OpenZFS](https://openzfs.org/)
+- Sponsored by [Barrer Software](https://barrersoftware.com)
 - Inspired by the need for simple, self-hosted NAS solutions
 
 ## 💬 Support
@@ -146,7 +166,10 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - 🐛 [Report bugs](https://github.com/ssfdre38/simplenas/issues)
 - 💡 [Request features](https://github.com/ssfdre38/simplenas/issues)
 - 📧 Contact: [GitHub @ssfdre38](https://github.com/ssfdre38)
+- 🏢 Enterprise: [admin@barrersoftware.com](mailto:admin@barrersoftware.com)
 
 ---
 
 **Made with ❤️ for the self-hosted community**
+
+**Sponsored by [Barrer Software](https://barrersoftware.com) 🛡️**
