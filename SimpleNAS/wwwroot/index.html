@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SimpleNAS - Simple NAS Management</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .nav-active { @apply bg-blue-600 text-white; }
+        .card { @apply bg-white rounded-lg shadow p-6 mb-4; }
+    </style>
+</head>
+<body class="bg-gray-100">
+    <nav class="bg-gray-800 text-white p-4">
+        <div class="container mx-auto flex justify-between items-center">
+            <h1 class="text-2xl font-bold">SimpleNAS</h1>
+            <div class="space-x-4">
+                <button onclick="showTab('dashboard')" class="nav-btn px-4 py-2 rounded" data-tab="dashboard">Dashboard</button>
+                <button onclick="showTab('zfs')" class="nav-btn px-4 py-2 rounded" data-tab="zfs">ZFS</button>
+                <button onclick="showTab('shares')" class="nav-btn px-4 py-2 rounded" data-tab="shares">Shares</button>
+                <button onclick="showTab('network')" class="nav-btn px-4 py-2 rounded" data-tab="network">Network</button>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mx-auto p-6">
+        <!-- Dashboard Tab -->
+        <div id="tab-dashboard" class="tab-content">
+            <h2 class="text-3xl font-bold mb-6">System Status</h2>
+            
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                <div class="card">
+                    <h3 class="text-lg font-semibold mb-2">CPU</h3>
+                    <p class="text-3xl font-bold text-blue-600" id="cpu-usage">--%</p>
+                </div>
+                <div class="card">
+                    <h3 class="text-lg font-semibold mb-2">Memory</h3>
+                    <p class="text-3xl font-bold text-green-600" id="mem-usage">--%</p>
+                </div>
+                <div class="card">
+                    <h3 class="text-lg font-semibold mb-2">Disk</h3>
+                    <p class="text-3xl font-bold text-orange-600" id="disk-usage">--%</p>
+                </div>
+            </div>
+
+            <div class="card">
+                <h3 class="text-xl font-semibold mb-4">Services</h3>
+                <div id="services-list" class="space-y-2"></div>
+            </div>
+        </div>
+
+        <!-- ZFS Tab -->
+        <div id="tab-zfs" class="tab-content hidden">
+            <h2 class="text-3xl font-bold mb-6">ZFS Pools</h2>
+            
+            <button onclick="showCreatePool()" class="bg-blue-600 text-white px-4 py-2 rounded mb-4">
+                Create Pool
+            </button>
+
+            <div id="pools-list" class="space-y-4"></div>
+
+            <!-- Create Pool Modal -->
+            <div id="create-pool-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
+                <div class="bg-white rounded-lg p-6 w-full max-w-md">
+                    <h3 class="text-xl font-bold mb-4">Create ZFS Pool</h3>
+                    <form onsubmit="createPool(event)">
+                        <div class="mb-4">
+                            <label class="block mb-2">Pool Name</label>
+                            <input type="text" id="pool-name" class="w-full border rounded px-3 py-2" required>
+                        </div>
+                        <div class="mb-4">
+                            <label class="block mb-2">VDEV Type</label>
+                            <select id="pool-type" class="w-full border rounded px-3 py-2">
+                                <option value="stripe">Stripe (RAID0)</option>
+                                <option value="mirror">Mirror (RAID1)</option>
+                                <option value="raidz">RAIDZ (RAID5)</option>
+                                <option value="raidz2">RAIDZ2 (RAID6)</option>
+                            </select>
+                        </div>
+                        <div class="mb-4">
+                            <label class="block mb-2">Devices</label>
+                            <div id="devices-list" class="space-y-2"></div>
+                        </div>
+                        <div class="flex gap-2">
+                            <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded">Create</button>
+                            <button type="button" onclick="hideCreatePool()" class="bg-gray-300 px-4 py-2 rounded">Cancel</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <!-- Shares Tab -->
+        <div id="tab-shares" class="tab-content hidden">
+            <h2 class="text-3xl font-bold mb-6">File Shares</h2>
+            
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                    <h3 class="text-xl font-semibold mb-4">SMB Shares</h3>
+                    <button onclick="showCreateSMB()" class="bg-blue-600 text-white px-4 py-2 rounded mb-4">
+                        New SMB Share
+                    </button>
+                    <div id="smb-list" class="space-y-2"></div>
+                </div>
+                <div>
+                    <h3 class="text-xl font-semibold mb-4">NFS Exports</h3>
+                    <button onclick="showCreateNFS()" class="bg-blue-600 text-white px-4 py-2 rounded mb-4">
+                        New NFS Export
+                    </button>
+                    <div id="nfs-list" class="space-y-2"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Network Tab -->
+        <div id="tab-network" class="tab-content hidden">
+            <h2 class="text-3xl font-bold mb-6">Network & VPN</h2>
+            
+            <div class="card">
+                <h3 class="text-xl font-semibold mb-4">Tailscale</h3>
+                <div id="tailscale-status" class="mb-4">
+                    <p>Checking status...</p>
+                </div>
+                <button onclick="startTailscale()" class="bg-green-600 text-white px-4 py-2 rounded mr-2">
+                    Start
+                </button>
+                <button onclick="stopTailscale()" class="bg-red-600 text-white px-4 py-2 rounded">
+                    Stop
+                </button>
+            </div>
+
+            <div class="card">
+                <h3 class="text-xl font-semibold mb-4">Network Interfaces</h3>
+                <div id="interfaces-list"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

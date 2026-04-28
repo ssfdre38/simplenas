@@ -1,0 +1,6 @@
+@SimpleNAS_HostAddress = http://localhost:5243
+
+GET {{SimpleNAS_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
