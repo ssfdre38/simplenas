@@ -166,7 +166,7 @@ app.MapGet("/api/zfs/pools", () =>
                 health = fields[9]      // HEALTH
             })
             .ToList();
-        return Results.Json(new { pools });
+        return Results.Ok(new { pools });
     } catch {
         return Results.Json(new { pools = Array.Empty<object>() });
     }
@@ -183,6 +183,21 @@ app.MapPost("/api/zfs/pools", async (HttpContext context) =>
     return Results.Ok(new { status = "created" });
 });
 
+app.MapGet("/api/zfs/devices", () =>
+{
+    try {
+        var output = RunCommand("lsblk", "-d", "-n", "-o", "NAME,SIZE,TYPE");
+        var devices = output.Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Select(line => line.Split((char[])null, StringSplitOptions.RemoveEmptyEntries))
+            .Where(fields => fields.Length >= 3 && fields[2] == "disk")
+            .Select(fields => new { name = "/dev/" + fields[0], size = fields[1] })
+            .ToList();
+        return Results.Ok(new { devices });
+    } catch {
+        return Results.Ok(new { devices = Array.Empty<object>() });
+    }
+});
+
 app.MapGet("/api/system/status", () =>
 {
     var dfOutput = RunCommand("df", "-h", "/");
@@ -192,17 +207,359 @@ app.MapGet("/api/system/status", () =>
         var fields = lines[1].Split((char[])null, StringSplitOptions.RemoveEmptyEntries);
         if (fields.Length >= 5) diskPercent = fields[4];
     }
+    
+    double cpuPercent = 0.0;
+    try {
+        var mpstat = RunCommand("top", "-b", "-n", "1");
+        var mpLines = mpstat.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        var cpuLine = mpLines.FirstOrDefault(l => l.Contains("%Cpu(s)") || l.Contains("CPU:"));
+        if (cpuLine != null) {
+            // Very simple parser for top CPU output
+            var idleIndex = cpuLine.IndexOf("id");
+            if (idleIndex > 0) {
+                var beforeIdle = cpuLine.Substring(0, idleIndex).Trim().Split(',').Last().Trim();
+                var idleFields = beforeIdle.Split((char[])null, StringSplitOptions.RemoveEmptyEntries);
+                if (idleFields.Length > 0 && double.TryParse(idleFields.Last().Replace("%", "").Replace("id", "").Trim(), out double idle)) {
+                    cpuPercent = 100.0 - idle;
+                }
+            }
+        }
+    } catch { }
+
+    double memPercent = 0.0;
+    try {
+        var freeOutput = RunCommand("free", "-m");
+        var memLines = freeOutput.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        if (memLines.Length >= 2) {
+            var memFields = memLines[1].Split((char[])null, StringSplitOptions.RemoveEmptyEntries);
+            if (memFields.Length >= 3 && double.TryParse(memFields[1], out double total) && double.TryParse(memFields[2], out double used)) {
+                memPercent = (used / total) * 100.0;
+            }
+        }
+    } catch { }
+
     return Results.Json(new {
-        cpu = new { percent = 0.0 },
-        memory = new { percent = 0.0 },
+        cpu = new { percent = cpuPercent },
+        memory = new { percent = memPercent },
         disk = new { percent = diskPercent }
     });
+});
+
+app.MapGet("/api/system/services", () =>
+{
+    var services = new[] { "smbd", "nmbd", "ssh", "tailscaled" };
+    var status = services.ToDictionary(
+        s => s,
+        s => {
+            try {
+                var isActive = RunCommand("systemctl", "is-active", s).Trim();
+                return isActive == "active" ? "active" : "inactive";
+            } catch {
+                return "inactive";
+            }
+        }
+    );
+    return Results.Ok(new { services = status });
+});
+
+app.MapGet("/api/network/interfaces", () =>
+{
+    try {
+        var interfaces = System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces()
+            .Select(iface => new {
+                name = iface.Name,
+                state = iface.OperationalStatus == System.Net.NetworkInformation.OperationalStatus.Up ? "up" : "down",
+                addresses = iface.GetIPProperties().UnicastAddresses
+                    .Where(addr => addr.Address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork || addr.Address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6)
+                    .Select(addr => new { address = addr.Address.ToString() })
+                    .ToList()
+            })
+            .ToList();
+        return Results.Ok(new { interfaces });
+    } catch {
+        return Results.Ok(new { interfaces = Array.Empty<object>() });
+    }
+});
+
+app.MapGet("/api/network/tailscale/status", () =>
+{
+    try {
+        var tailscalePath = RunCommand("which", "tailscale").Trim();
+        var installed = !string.IsNullOrEmpty(tailscalePath);
+        var running = false;
+        if (installed) {
+            var isActive = RunCommand("systemctl", "is-active", "tailscaled").Trim();
+            running = isActive == "active";
+        }
+        return Results.Ok(new { installed, running });
+    } catch {
+        return Results.Ok(new { installed = false, running = false });
+    }
+});
+
+app.MapPost("/api/network/tailscale/up", () =>
+{
+    try {
+        RunCommand("systemctl", "start", "tailscaled");
+        return Results.Ok(new { success = true });
+    } catch (Exception ex) {
+        return Results.Problem(ex.Message);
+    }
+});
+
+app.MapPost("/api/network/tailscale/down", () =>
+{
+    try {
+        RunCommand("systemctl", "stop", "tailscaled");
+        return Results.Ok(new { success = true });
+    } catch (Exception ex) {
+        return Results.Problem(ex.Message);
+    }
+});
+
+// SMB Shares Endpoints
+app.MapGet("/api/shares/smb", () =>
+{
+    var shares = ParseSmbConf(GetSmbConfPath());
+    return Results.Ok(new { shares });
+});
+
+app.MapPost("/api/shares/smb", async (HttpContext context) =>
+{
+    var request = await context.Request.ReadFromJsonAsync<CreateSmbShareRequest>();
+    if (request == null || string.IsNullOrWhiteSpace(request.Name) || string.IsNullOrWhiteSpace(request.Path))
+        return Results.BadRequest(new { error = "Invalid request parameters" });
+
+    try {
+        AddSmbShare(GetSmbConfPath(), request);
+        if (OperatingSystem.IsLinux()) {
+            RunCommand("systemctl", "reload", "smbd");
+        }
+        return Results.Ok(new { success = true });
+    } catch (Exception ex) {
+        return Results.Problem(ex.Message);
+    }
+});
+
+app.MapDelete("/api/shares/smb/{name}", (string name) =>
+{
+    if (string.IsNullOrWhiteSpace(name))
+        return Results.BadRequest(new { error = "Invalid share name" });
+
+    try {
+        DeleteSmbShare(GetSmbConfPath(), name);
+        if (OperatingSystem.IsLinux()) {
+            RunCommand("systemctl", "reload", "smbd");
+        }
+        return Results.Ok(new { success = true });
+    } catch (Exception ex) {
+        return Results.Problem(ex.Message);
+    }
+});
+
+// NFS Exports Endpoints
+app.MapGet("/api/shares/nfs", () =>
+{
+    var exports = ParseNfsExports(GetNfsExportsPath());
+    return Results.Ok(new { exports });
+});
+
+app.MapPost("/api/shares/nfs", async (HttpContext context) =>
+{
+    var request = await context.Request.ReadFromJsonAsync<CreateNfsExportRequest>();
+    if (request == null || string.IsNullOrWhiteSpace(request.Path) || request.Clients == null || !request.Clients.Any())
+        return Results.BadRequest(new { error = "Invalid request parameters" });
+
+    try {
+        AddNfsExport(GetNfsExportsPath(), request);
+        if (OperatingSystem.IsLinux()) {
+            RunCommand("exportfs", "-ar");
+        }
+        return Results.Ok(new { success = true });
+    } catch (Exception ex) {
+        return Results.Problem(ex.Message);
+    }
+});
+
+app.MapDelete("/api/shares/nfs", async (HttpContext context) =>
+{
+    var request = await context.Request.ReadFromJsonAsync<DeleteNfsExportRequest>();
+    if (request == null || string.IsNullOrWhiteSpace(request.Path))
+        return Results.BadRequest(new { error = "Invalid request parameters" });
+
+    try {
+        DeleteNfsExport(GetNfsExportsPath(), request.Path);
+        if (OperatingSystem.IsLinux()) {
+            RunCommand("exportfs", "-ar");
+        }
+        return Results.Ok(new { success = true });
+    } catch (Exception ex) {
+        return Results.Problem(ex.Message);
+    }
 });
 
 Console.WriteLine("SimpleNAS running on http://0.0.0.0:8000");
 Console.WriteLine("Default login: admin / SimpleNAS2026");
 app.Run();
 
+// File Path Helpers
+string GetSmbConfPath()
+{
+    if (OperatingSystem.IsLinux()) return "/etc/samba/smb.conf";
+    var localPath = Path.Combine(Directory.GetCurrentDirectory(), "smb.conf");
+    if (!File.Exists(localPath)) File.WriteAllText(localPath, "[global]\n\tworkgroup = WORKGROUP\n");
+    return localPath;
+}
+
+string GetNfsExportsPath()
+{
+    if (OperatingSystem.IsLinux()) return "/etc/exports";
+    var localPath = Path.Combine(Directory.GetCurrentDirectory(), "exports");
+    if (!File.Exists(localPath)) File.WriteAllText(localPath, "# NFS exports\n");
+    return localPath;
+}
+
+// INI-like Samba config parser
+List<SmbShare> ParseSmbConf(string filePath)
+{
+    var shares = new List<SmbShare>();
+    if (!File.Exists(filePath)) return shares;
+    
+    var lines = File.ReadAllLines(filePath);
+    string? currentSection = null;
+    var currentConfig = new Dictionary<string, string>();
+    
+    foreach (var rawLine in lines)
+    {
+        var line = rawLine.Trim();
+        if (string.IsNullOrEmpty(line) || line.StartsWith(";") || line.StartsWith("#"))
+            continue;
+            
+        if (line.StartsWith("[") && line.EndsWith("]"))
+        {
+            if (currentSection != null && currentSection != "global" && currentSection != "printers" && currentSection != "print$")
+            {
+                shares.Add(new SmbShare(currentSection, new Dictionary<string, string>(currentConfig)));
+            }
+            currentSection = line.Substring(1, line.Length - 2).Trim();
+            currentConfig.Clear();
+        }
+        else if (currentSection != null)
+        {
+            var parts = line.Split('=', 2);
+            if (parts.Length == 2)
+            {
+                var key = parts[0].Trim();
+                var value = parts[1].Trim();
+                currentConfig[key] = value;
+            }
+        }
+    }
+    
+    if (currentSection != null && currentSection != "global" && currentSection != "printers" && currentSection != "print$")
+    {
+        shares.Add(new SmbShare(currentSection, new Dictionary<string, string>(currentConfig)));
+    }
+    
+    return shares;
+}
+
+void AddSmbShare(string filePath, CreateSmbShareRequest share)
+{
+    var sb = new StringBuilder();
+    sb.AppendLine();
+    sb.AppendLine($"[{share.Name}]");
+    sb.AppendLine($"\tpath = {share.Path}");
+    sb.AppendLine($"\tread only = {(share.ReadOnly ? "yes" : "no")}");
+    sb.AppendLine($"\tguest ok = {(share.GuestOk ? "yes" : "no")}");
+    sb.AppendLine($"\tcreate mask = 0775");
+    sb.AppendLine($"\tdirectory mask = 0775");
+    
+    File.AppendAllText(filePath, sb.ToString());
+}
+
+void DeleteSmbShare(string filePath, string shareName)
+{
+    if (!File.Exists(filePath)) return;
+    var lines = File.ReadAllLines(filePath);
+    var newLines = new List<string>();
+    bool insideTargetSection = false;
+    
+    foreach (var rawLine in lines)
+    {
+        var line = rawLine.Trim();
+        if (line.StartsWith("[") && line.EndsWith("]"))
+        {
+            var sectionName = line.Substring(1, line.Length - 2).Trim();
+            if (sectionName == shareName)
+            {
+                insideTargetSection = true;
+                continue;
+            }
+            else
+            {
+                insideTargetSection = false;
+            }
+        }
+        
+        if (insideTargetSection) continue;
+        newLines.Add(rawLine);
+    }
+    
+    File.WriteAllLines(filePath, newLines);
+}
+
+// NFS exports file parser
+List<NfsExport> ParseNfsExports(string filePath)
+{
+    var exports = new List<NfsExport>();
+    if (!File.Exists(filePath)) return exports;
+    
+    var lines = File.ReadAllLines(filePath);
+    foreach (var rawLine in lines)
+    {
+        var line = rawLine.Trim();
+        if (string.IsNullOrEmpty(line) || line.StartsWith("#"))
+            continue;
+            
+        var parts = line.Split((char[])null, StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length >= 1)
+        {
+            var path = parts[0];
+            var clients = parts.Skip(1).ToList();
+            exports.Add(new NfsExport(path, clients));
+        }
+    }
+    return exports;
+}
+
+void AddNfsExport(string filePath, CreateNfsExportRequest export)
+{
+    var clientStr = string.Join(" ", export.Clients.Select(c => $"{c}({export.Options})"));
+    var line = $"\n{export.Path} {clientStr}";
+    File.AppendAllText(filePath, line);
+}
+
+void DeleteNfsExport(string filePath, string path)
+{
+    if (!File.Exists(filePath)) return;
+    var lines = File.ReadAllLines(filePath);
+    var newLines = lines.Where(rawLine => {
+        var line = rawLine.Trim();
+        if (string.IsNullOrEmpty(line) || line.StartsWith("#")) return true;
+        var parts = line.Split((char[])null, StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length >= 1 && parts[0].TrimEnd('/') == path.TrimEnd('/')) return false;
+        return true;
+    }).ToList();
+    
+    File.WriteAllLines(filePath, newLines);
+}
+
 record ZfsPoolRequest(string Name, string VdevType, string[] Devices);
 record LoginRequest(string Username, string Password);
 record ChangePasswordRequest(string CurrentPassword, string NewPassword);
+record CreateSmbShareRequest(string Name, string Path, bool ReadOnly, bool GuestOk);
+record CreateNfsExportRequest(string Path, List<string> Clients, string Options);
+record DeleteNfsExportRequest(string Path);
+record SmbShare(string Name, Dictionary<string, string> Config);
+record NfsExport(string Path, List<string> Clients);

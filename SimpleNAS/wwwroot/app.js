@@ -162,9 +162,14 @@ async function loadShares() {
         } else {
             smbData.shares.forEach(share => {
                 smbList.innerHTML += `
-                    <div class="p-3 bg-white rounded shadow">
-                        <div class="font-bold">${share.name}</div>
-                        <div class="text-sm text-gray-600">${share.config.path || 'N/A'}</div>
+                    <div class="p-3 bg-white rounded shadow flex justify-between items-center mb-2">
+                        <div>
+                            <div class="font-bold text-gray-800">${share.name}</div>
+                            <div class="text-sm text-gray-500">${share.config.path || 'N/A'}</div>
+                        </div>
+                        <button onclick="deleteSMB('${share.name}')" class="text-red-600 hover:text-red-800 font-semibold text-sm">
+                            Delete
+                        </button>
                     </div>
                 `;
             });
@@ -182,15 +187,139 @@ async function loadShares() {
         } else {
             nfsData.exports.forEach(exp => {
                 nfsList.innerHTML += `
-                    <div class="p-3 bg-white rounded shadow">
-                        <div class="font-bold">${exp.path}</div>
-                        <div class="text-sm text-gray-600">${exp.clients.join(', ')}</div>
+                    <div class="p-3 bg-white rounded shadow flex justify-between items-center mb-2">
+                        <div>
+                            <div class="font-bold text-gray-800">${exp.path}</div>
+                            <div class="text-sm text-gray-500">${exp.clients.join(', ')}</div>
+                        </div>
+                        <button onclick="deleteNFS('${exp.path}')" class="text-red-600 hover:text-red-800 font-semibold text-sm">
+                            Delete
+                        </button>
                     </div>
                 `;
             });
         }
     } catch (error) {
         console.error('Shares load error:', error);
+    }
+}
+
+// SMB actions
+function showCreateSMB() {
+    document.getElementById('create-smb-modal').classList.remove('hidden');
+}
+
+function hideCreateSMB() {
+    document.getElementById('create-smb-modal').classList.add('hidden');
+    document.getElementById('smb-name').value = '';
+    document.getElementById('smb-path').value = '';
+}
+
+async function createSMB(event) {
+    event.preventDefault();
+    const name = document.getElementById('smb-name').value;
+    const path = document.getElementById('smb-path').value;
+    const readonly = document.getElementById('smb-readonly').checked;
+    const guestok = document.getElementById('smb-guestok').checked;
+    
+    try {
+        const response = await fetch(`${API_BASE}/shares/smb`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({name, path, readOnly: readonly, guestOk: guestok})
+        });
+        
+        if (response.ok) {
+            alert('SMB share created successfully!');
+            hideCreateSMB();
+            loadShares();
+        } else {
+            const err = await response.json();
+            alert(`Failed to create share: ${err.error || err.detail || 'Unknown error'}`);
+        }
+    } catch (error) {
+        alert(`Error: ${error.message}`);
+    }
+}
+
+async function deleteSMB(name) {
+    if (!confirm(`Are you sure you want to delete the SMB share "${name}"?`)) return;
+    
+    try {
+        const response = await fetch(`${API_BASE}/shares/smb/${name}`, {
+            method: 'DELETE'
+        });
+        
+        if (response.ok) {
+            alert('SMB share deleted successfully!');
+            loadShares();
+        } else {
+            const err = await response.json();
+            alert(`Failed to delete share: ${err.error || 'Unknown error'}`);
+        }
+    } catch (error) {
+        alert(`Error: ${error.message}`);
+    }
+}
+
+// NFS actions
+function showCreateNFS() {
+    document.getElementById('create-nfs-modal').classList.remove('hidden');
+}
+
+function hideCreateNFS() {
+    document.getElementById('create-nfs-modal').classList.add('hidden');
+    document.getElementById('nfs-path').value = '';
+    document.getElementById('nfs-clients').value = '';
+}
+
+async function createNFS(event) {
+    event.preventDefault();
+    const path = document.getElementById('nfs-path').value;
+    const clientsStr = document.getElementById('nfs-clients').value;
+    const options = document.getElementById('nfs-options').value;
+    
+    const clients = clientsStr.split(',').map(c => c.trim()).filter(c => c.length > 0);
+    
+    try {
+        const response = await fetch(`${API_BASE}/shares/nfs`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({path, clients, options})
+        });
+        
+        if (response.ok) {
+            alert('NFS export created successfully!');
+            hideCreateNFS();
+            loadShares();
+        } else {
+            const err = await response.json();
+            alert(`Failed to export: ${err.error || err.detail || 'Unknown error'}`);
+        }
+    } catch (error) {
+        alert(`Error: ${error.message}`);
+    }
+}
+
+async function deleteNFS(path) {
+    if (!confirm(`Are you sure you want to stop exporting "${path}"?`)) return;
+    
+    try {
+        const response = await fetch(`${API_BASE}/shares/nfs`, {
+            method: 'DELETE',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({path})
+        });
+        
+        if (response.ok) {
+            alert('NFS export removed successfully!');
+            loadShares();
+        } else {
+            const err = await response.json();
+            alert(`Failed to remove export: ${err.error || 'Unknown error'}`);
+        }
+    } catch (error) {
+        alert(`Error: ${error.message}`);
     }
 }
 
