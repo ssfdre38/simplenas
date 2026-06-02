@@ -51,11 +51,25 @@ app.Use(async (context, next) =>
     await next();
 });
 
+string ResolveCommandPath(string command)
+{
+    if (!OperatingSystem.IsLinux()) return command;
+    
+    var searchPaths = new[] { "/usr/sbin", "/sbin", "/usr/bin", "/bin" };
+    foreach (var path in searchPaths)
+    {
+        var fullPath = Path.Combine(path, command);
+        if (File.Exists(fullPath)) return fullPath;
+    }
+    return command;
+}
+
 string RunCommand(string command, params string[] args)
 {
+    var resolvedCommand = ResolveCommandPath(command);
     var psi = new ProcessStartInfo
     {
-        FileName = command,
+        FileName = resolvedCommand,
         Arguments = string.Join(" ", args),
         RedirectStandardOutput = true,
         RedirectStandardError = true,
@@ -164,7 +178,7 @@ app.MapGet("/api/zfs/pools", () =>
             return Results.Json(new { pools = Array.Empty<object>() });
         
         var pools = output.Split('\n', StringSplitOptions.RemoveEmptyEntries)
-            .Select(line => line.Split('\t', StringSplitOptions.RemoveEmptyEntries)) // Tab-separated!
+            .Select(line => line.Split((char[])null, StringSplitOptions.RemoveEmptyEntries)) // Splits by any whitespace!
             .Where(fields => fields.Length >= 10)
             .Select(fields => new { 
                 name = fields[0],       // NAME
@@ -172,7 +186,7 @@ app.MapGet("/api/zfs/pools", () =>
                 alloc = fields[2],      // ALLOC
                 allocated = fields[2],  // ALLOC (frontend expects 'allocated')
                 free = fields[3],       // FREE
-                capacity = fields[6],   // CAP
+                capacity = fields.Length >= 8 ? fields[7] : fields[6],   // CAP is index 7, fallback to 6
                 health = fields[9]      // HEALTH
             })
             .ToList();
@@ -274,6 +288,15 @@ app.MapGet("/api/zfs/devices", () =>
 
 app.MapGet("/api/system/status", () =>
 {
+    if (!OperatingSystem.IsLinux())
+    {
+        return Results.Json(new {
+            cpu = new { percent = 14.2 },
+            memory = new { percent = 38.6 },
+            disk = new { percent = "28%" }
+        });
+    }
+
     var dfOutput = RunCommand("df", "-h", "/");
     var lines = dfOutput.Split('\n', StringSplitOptions.RemoveEmptyEntries);
     var diskPercent = "0%";
@@ -288,7 +311,6 @@ app.MapGet("/api/system/status", () =>
         var mpLines = mpstat.Split('\n', StringSplitOptions.RemoveEmptyEntries);
         var cpuLine = mpLines.FirstOrDefault(l => l.Contains("%Cpu(s)") || l.Contains("CPU:"));
         if (cpuLine != null) {
-            // Very simple parser for top CPU output
             var idleIndex = cpuLine.IndexOf("id");
             if (idleIndex > 0) {
                 var beforeIdle = cpuLine.Substring(0, idleIndex).Trim().Split(',').Last().Trim();
@@ -514,13 +536,13 @@ app.MapGet("/api/zfs/datasets", () =>
             return Results.Ok(new { datasets = Array.Empty<object>() });
 
         var datasets = output.Split('\n', StringSplitOptions.RemoveEmptyEntries)
-            .Select(line => line.Split('\t', StringSplitOptions.RemoveEmptyEntries))
+            .Select(line => line.Split((char[])null, StringSplitOptions.RemoveEmptyEntries)) // Splits by any whitespace!
             .Where(fields => fields.Length >= 4)
             .Select(fields => new {
                 name = fields[0],      // NAME
                 used = fields[1],      // USED
                 avail = fields[2],     // AVAIL
-                mountpoint = fields[3] // MOUNTPOINT
+                mountpoint = fields.Length >= 5 ? fields[4] : fields[3] // MOUNTPOINT (index 4 in 5-column whitespace split)
             })
             .ToList();
         return Results.Ok(new { datasets });
@@ -599,12 +621,12 @@ app.MapGet("/api/zfs/snapshots", () =>
             return Results.Ok(new { snapshots = Array.Empty<object>() });
 
         var snapshots = output.Split('\n', StringSplitOptions.RemoveEmptyEntries)
-            .Select(line => line.Split('\t', StringSplitOptions.RemoveEmptyEntries))
+            .Select(line => line.Split((char[])null, StringSplitOptions.RemoveEmptyEntries)) // Splits by any whitespace!
             .Where(fields => fields.Length >= 4)
             .Select(fields => new {
                 name = fields[0],      // NAME
                 used = fields[1],      // USED
-                refer = fields[3]      // REFER
+                refer = fields.Length >= 4 ? fields[3] : fields[1] // REFER (index 3 in 5-column whitespace split)
             })
             .ToList();
         return Results.Ok(new { snapshots });
@@ -750,7 +772,7 @@ app.MapGet("/api/users", () =>
 {
     try {
         if (OperatingSystem.IsLinux()) {
-            var output = RunCommand("sudo", "pdbedit", "-L");
+            var output = RunCommand("pdbedit", "-L");
             var users = output.Split('\n', StringSplitOptions.RemoveEmptyEntries)
                 .Select(line => {
                     var parts = line.Split(':');
@@ -779,9 +801,9 @@ app.MapPost("/api/users", async (HttpContext context) =>
     try {
         if (OperatingSystem.IsLinux()) {
             // 1. Create system user (no nologin shell, no home directory)
-            RunCommand("sudo", "useradd", "-M", "-s", "/sbin/nologin", request.Username);
+            RunCommand("useradd", "-M", "-s", "/sbin/nologin", request.Username);
             // 2. Set Samba password
-            var smbCmd = $"echo -e \"{request.Password}\\n{request.Password}\" | sudo smbpasswd -a -s {request.Username}";
+            var smbCmd = $"echo -e \"{request.Password}\\n{request.Password}\" | smbpasswd -a -s {request.Username}";
             RunCommand("bash", "-c", smbCmd);
         } else {
             var path = GetUsersFilePath();
@@ -799,8 +821,8 @@ app.MapDelete("/api/users/{username}", (string username) =>
 
     try {
         if (OperatingSystem.IsLinux()) {
-            RunCommand("sudo", "smbpasswd", "-x", username);
-            RunCommand("sudo", "userdel", username);
+            RunCommand("smbpasswd", "-x", username);
+            RunCommand("userdel", username);
         } else {
             var path = GetUsersFilePath();
             if (File.Exists(path)) {
