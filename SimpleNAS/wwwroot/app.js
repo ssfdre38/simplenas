@@ -1094,13 +1094,77 @@ async function destroyPool(poolName) {
     }
 }
 
-// Initialize - show dashboard
-document.addEventListener('DOMContentLoaded', () => {
-    showTab('dashboard');
+// Authentication Flow
+async function checkAuth() {
+    try {
+        const response = await fetch(`${API_BASE}/auth/status`);
+        const data = await response.json();
+        
+        if (data.authenticated) {
+            document.getElementById('login-screen').classList.add('hidden');
+            showTab('dashboard');
+        } else {
+            document.getElementById('login-screen').classList.remove('hidden');
+        }
+    } catch (e) {
+        console.error('Auth check error:', e);
+        document.getElementById('login-screen').classList.remove('hidden');
+    }
+}
+
+async function handleLogin(event) {
+    event.preventDefault();
+    const username = document.getElementById('login-username').value;
+    const password = document.getElementById('login-password').value;
+    const errDiv = document.getElementById('login-error');
+    
+    errDiv.classList.add('hidden');
+    
+    try {
+        const response = await fetch(`${API_BASE}/auth/login`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({username, password})
+        });
+        
+        if (response.ok) {
+            document.getElementById('login-screen').classList.add('hidden');
+            document.getElementById('login-username').value = '';
+            document.getElementById('login-password').value = '';
+            showTab('dashboard');
+        } else {
+            errDiv.classList.remove('hidden');
+        }
+    } catch (e) {
+        alert(`Login error: ${e.message}`);
+    }
+}
+
+async function handleLogout() {
+    if (!confirm('Are you sure you want to sign out of the dashboard?')) return;
+    
+    try {
+        const response = await fetch(`${API_BASE}/auth/logout`, {
+            method: 'POST'
+        });
+        
+        if (response.ok) {
+            document.getElementById('login-screen').classList.remove('hidden');
+        }
+    } catch (e) {
+        console.error('Logout error:', e);
+    }
+}
+
+// Initialize - check auth first
+document.addEventListener('DOMContentLoaded', async () => {
+    await checkAuth();
     
     // Auto-refresh dashboard every 5 seconds
     setInterval(() => {
-        if (!document.getElementById('tab-dashboard').classList.contains('hidden')) {
+        const loginScreen = document.getElementById('login-screen');
+        const dashboardTab = document.getElementById('tab-dashboard');
+        if (loginScreen && loginScreen.classList.contains('hidden') && dashboardTab && !dashboardTab.classList.contains('hidden')) {
             loadDashboard();
         }
     }, 5000);
