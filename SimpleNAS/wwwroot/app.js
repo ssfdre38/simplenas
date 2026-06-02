@@ -17,6 +17,7 @@ function showTab(tabName) {
         case 'zfs':
             loadZFSPools();
             loadZfsDatasets();
+            loadZfsSnapshots();
             loadZfsDevices();
             break;
         case 'shares':
@@ -173,6 +174,15 @@ async function loadZFSPools() {
                             <span class="block font-bold text-slate-200 mt-1">${pool.capacity}</span>
                         </div>
                     </div>
+                    
+                    <div class="flex justify-end gap-2 mt-4 pt-3 border-t border-slate-800/40">
+                        <button onclick="scrubPool('${pool.name}')" class="bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 border border-cyan-500/20 text-[10px] font-bold px-3 py-1.5 rounded-lg transition-all">
+                            Scrub Pool
+                        </button>
+                        <button onclick="destroyPool('${pool.name}')" class="bg-rose-500/10 hover:bg-rose-500/20 text-rose-500 border border-rose-500/20 text-[10px] font-bold px-3 py-1.5 rounded-lg transition-all">
+                            Destroy Pool
+                        </button>
+                    </div>
                 </div>
             `;
         });
@@ -201,6 +211,7 @@ async function loadZfsDatasets() {
                         <th class="py-2">Used</th>
                         <th class="py-2">Available</th>
                         <th class="py-2">Mount Point</th>
+                        <th class="py-2 text-right">Actions</th>
                     </tr>
                 </thead>
                 <tbody class="divide-y divide-slate-850">
@@ -213,6 +224,11 @@ async function loadZfsDatasets() {
                     <td class="py-3 font-mono">${ds.used}</td>
                     <td class="py-3 font-mono">${ds.avail}</td>
                     <td class="py-3 font-mono text-slate-400">${ds.mountpoint}</td>
+                    <td class="py-3 text-right">
+                        <button onclick="deleteDataset('${ds.name}')" class="text-rose-500 hover:text-rose-400 font-bold bg-rose-500/10 hover:bg-rose-500/20 px-2 py-1 rounded border border-rose-500/20 transition-all text-[10px]">
+                            Delete
+                        </button>
+                    </td>
                 </tr>
             `;
         });
@@ -808,6 +824,270 @@ async function deleteUser(username) {
             loadUsers();
         } else {
             alert('Failed to delete user');
+        }
+    } catch (e) {
+        alert(`Error: ${e.message}`);
+    }
+}
+
+// ZFS Snapshots
+async function loadZfsSnapshots() {
+    try {
+        const response = await fetch(`${API_BASE}/zfs/snapshots`);
+        const data = await response.json();
+        
+        const snapshotsList = document.getElementById('snapshots-list');
+        snapshotsList.innerHTML = '';
+        
+        if (data.snapshots.length === 0) {
+            snapshotsList.innerHTML = '<p class="text-slate-500 text-sm">No snapshots taken yet</p>';
+            return;
+        }
+        
+        data.snapshots.forEach(snap => {
+            snapshotsList.innerHTML += `
+                <div class="p-3 bg-slate-900/40 border border-slate-850 rounded-xl flex justify-between items-center text-xs">
+                    <div>
+                        <span class="block font-bold text-slate-200 font-mono">${snap.name}</span>
+                        <span class="block text-slate-450 text-[10px] mt-0.5 font-mono">Size Referenced: ${snap.refer}</span>
+                    </div>
+                    <div class="flex space-x-2">
+                        <button onclick="rollbackSnapshot('${snap.name}')" class="bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-450 border border-emerald-500/20 px-2.5 py-1.5 rounded-lg font-bold transition-all">
+                            Rollback
+                        </button>
+                        <button onclick="destroySnapshot('${snap.name}')" class="bg-rose-500/10 hover:bg-rose-500/20 text-rose-500 border border-rose-500/20 px-2.5 py-1.5 rounded-lg font-bold transition-all">
+                            Delete
+                        </button>
+                    </div>
+                </div>
+            `;
+        });
+    } catch (e) {
+        console.error('Error loading snapshots:', e);
+    }
+}
+
+// Create Dataset actions
+async function showCreateDataset() {
+    try {
+        const response = await fetch(`${API_BASE}/zfs/pools`);
+        const data = await response.json();
+        
+        const select = document.getElementById('dataset-pool');
+        select.innerHTML = '';
+        
+        if (data.pools.length === 0) {
+            select.innerHTML = '<option value="">-- No pools available --</option>';
+        } else {
+            data.pools.forEach(pool => {
+                select.innerHTML += `<option value="${pool.name}">${pool.name}</option>`;
+            });
+        }
+    } catch (e) {
+        console.error('Error fetching pools for dataset:', e);
+    }
+    document.getElementById('create-dataset-modal').classList.remove('hidden');
+}
+
+function hideCreateDataset() {
+    document.getElementById('create-dataset-modal').classList.add('hidden');
+    document.getElementById('dataset-name').value = '';
+}
+
+async function createDataset(event) {
+    event.preventDefault();
+    const pool = document.getElementById('dataset-pool').value;
+    const name = document.getElementById('dataset-name').value;
+    
+    if (!pool) {
+        alert('Please select a valid parent pool.');
+        return;
+    }
+    
+    try {
+        const response = await fetch(`${API_BASE}/zfs/datasets`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({pool, name})
+        });
+        
+        if (response.ok) {
+            alert(`Dataset "${pool}/${name}" created successfully!`);
+            hideCreateDataset();
+            loadZfsDatasets();
+        } else {
+            const err = await response.json();
+            alert(`Failed to create dataset: ${err.error || 'Unknown error'}`);
+        }
+    } catch (e) {
+        alert(`Error: ${e.message}`);
+    }
+}
+
+async function deleteDataset(name) {
+    if (!confirm(`Are you sure you want to delete dataset "${name}"?\nWARNING: This will permanently delete all files inside the dataset!`)) return;
+    
+    try {
+        const response = await fetch(`${API_BASE}/zfs/datasets/${name}`, {
+            method: 'DELETE'
+        });
+        
+        if (response.ok) {
+            alert(`Dataset "${name}" successfully deleted!`);
+            loadZfsDatasets();
+            loadZfsSnapshots();
+        } else {
+            alert('Failed to delete dataset');
+        }
+    } catch (e) {
+        alert(`Error: ${e.message}`);
+    }
+}
+
+// Snapshot actions
+async function showCreateSnapshot() {
+    try {
+        // Load datasets to populate dropdown
+        const response = await fetch(`${API_BASE}/zfs/datasets`);
+        const data = await response.json();
+        
+        const select = document.getElementById('snapshot-dataset');
+        select.innerHTML = '';
+        
+        if (data.datasets.length === 0) {
+            select.innerHTML = '<option value="">-- No datasets available --</option>';
+        } else {
+            data.datasets.forEach(ds => {
+                select.innerHTML += `<option value="${ds.name}">${ds.name}</option>`;
+            });
+        }
+    } catch (e) {
+        console.error('Error fetching datasets for snapshots:', e);
+    }
+    document.getElementById('create-snapshot-modal').classList.remove('hidden');
+}
+
+function hideCreateSnapshot() {
+    document.getElementById('create-snapshot-modal').classList.add('hidden');
+    document.getElementById('snapshot-name').value = '';
+}
+
+async function createSnapshot(event) {
+    event.preventDefault();
+    const dataset = document.getElementById('snapshot-dataset').value;
+    const name = document.getElementById('snapshot-name').value;
+    
+    if (!dataset) {
+        alert('Please select a valid target dataset.');
+        return;
+    }
+    
+    try {
+        const response = await fetch(`${API_BASE}/zfs/snapshots`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({dataset, name})
+        });
+        
+        if (response.ok) {
+            alert(`Snapshot taken successfully: ${dataset}@${name}`);
+            hideCreateSnapshot();
+            loadZfsSnapshots();
+        } else {
+            const err = await response.json();
+            alert(`Failed to take snapshot: ${err.error || 'Unknown error'}`);
+        }
+    } catch (e) {
+        alert(`Error: ${e.message}`);
+    }
+}
+
+async function rollbackSnapshot(snapName) {
+    if (!confirm(`Are you sure you want to rollback to snapshot "${snapName}"?\nWARNING: Any changes made after this snapshot was taken will be permanently lost!`)) return;
+    
+    try {
+        const response = await fetch(`${API_BASE}/zfs/snapshots/rollback`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({snapshot: snapName})
+        });
+        
+        if (response.ok) {
+            alert(`Rollback completed successfully!`);
+            loadZfsDatasets();
+            loadZfsSnapshots();
+        } else {
+            alert('Failed to rollback snapshot');
+        }
+    } catch (e) {
+        alert(`Error: ${e.message}`);
+    }
+}
+
+async function destroySnapshot(snapName) {
+    if (!confirm(`Are you sure you want to delete snapshot "${snapName}"?`)) return;
+    
+    try {
+        const response = await fetch(`${API_BASE}/zfs/snapshots/${snapName}`, {
+            method: 'DELETE'
+        });
+        
+        if (response.ok) {
+            alert(`Snapshot deleted successfully.`);
+            loadZfsSnapshots();
+        } else {
+            alert('Failed to delete snapshot');
+        }
+    } catch (e) {
+        alert(`Error: ${e.message}`);
+    }
+}
+
+// Pool scrub / destroy actions
+async function scrubPool(poolName) {
+    if (!confirm(`Are you sure you want to initiate a ZFS scrub on pool "${poolName}"?\nThis scans all data blocks for integrity errors and repairs them in the background.`)) return;
+    
+    try {
+        const response = await fetch(`${API_BASE}/zfs/pools/scrub`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({pool: poolName})
+        });
+        
+        if (response.ok) {
+            alert(`Pool scrub initiated successfully on "${poolName}"! You can monitor the health status in the pool view.`);
+            loadZFSPools();
+        } else {
+            alert('Failed to initiate pool scrub');
+        }
+    } catch (e) {
+        alert(`Error: ${e.message}`);
+    }
+}
+
+async function destroyPool(poolName) {
+    const doubleCheck = confirm(`DANGER WARNING: Are you sure you want to completely destroy the ZFS pool "${poolName}"?\n\nThis will PERMANENTLY DESTROY all datasets, snapshots, and data files within this pool! THIS CANNOT BE UNDONE!`);
+    if (!doubleCheck) return;
+    
+    const finalConfirmation = prompt(`To confirm destroying the pool, please type the pool name exactly ("${poolName}"):`);
+    if (finalConfirmation !== poolName) {
+        alert('Pool name mismatch. Destroy operation cancelled.');
+        return;
+    }
+    
+    try {
+        const response = await fetch(`${API_BASE}/zfs/pools/${poolName}`, {
+            method: 'DELETE'
+        });
+        
+        if (response.ok) {
+            alert(`Pool "${poolName}" has been completely destroyed.`);
+            loadZFSPools();
+            loadZfsDatasets();
+            loadZfsSnapshots();
+            loadZfsDevices();
+        } else {
+            alert('Failed to destroy pool. Make sure there are no active share mounts or processes using it.');
         }
     } catch (e) {
         alert(`Error: ${e.message}`);

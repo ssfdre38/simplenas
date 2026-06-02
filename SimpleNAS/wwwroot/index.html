@@ -174,12 +174,32 @@
                     </div>
 
                     <div class="glass-card rounded-2xl p-6 shadow-xl">
-                        <h3 class="text-xl font-bold text-white mb-4 flex items-center space-x-2">
-                            <span class="w-2.5 h-2.5 rounded-full bg-cyan-500"></span>
-                            <span>ZFS Datasets & Mounts</span>
-                        </h3>
+                        <div class="flex justify-between items-center mb-4">
+                            <h3 class="text-xl font-bold text-white flex items-center space-x-2">
+                                <span class="w-2.5 h-2.5 rounded-full bg-cyan-500"></span>
+                                <span>ZFS Datasets & Mounts</span>
+                            </h3>
+                            <button onclick="showCreateDataset()" class="bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 border border-cyan-500/20 text-xs font-semibold px-3 py-1.5 rounded-lg transition-all">
+                                + Create Dataset
+                            </button>
+                        </div>
                         <div id="datasets-list" class="overflow-x-auto">
                             <p class="text-slate-500 text-sm">No datasets found</p>
+                        </div>
+                    </div>
+
+                    <div class="glass-card rounded-2xl p-6 shadow-xl">
+                        <div class="flex justify-between items-center mb-4">
+                            <h3 class="text-xl font-bold text-white flex items-center space-x-2">
+                                <span class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
+                                <span>ZFS Instant Snapshots (Backups)</span>
+                            </h3>
+                            <button onclick="showCreateSnapshot()" class="bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 text-xs font-semibold px-3 py-1.5 rounded-lg transition-all">
+                                + Take Snapshot
+                            </button>
+                        </div>
+                        <div id="snapshots-list" class="space-y-3 max-h-60 overflow-y-auto">
+                            <p class="text-slate-500 text-sm">No snapshots taken yet</p>
                         </div>
                     </div>
                 </div>
@@ -237,6 +257,48 @@
                     <div class="flex justify-end">
                         <button type="button" onclick="hideImportPool()" class="bg-slate-800 hover:bg-slate-750 text-slate-300 px-5 py-2.5 rounded-xl transition-all">Close</button>
                     </div>
+                </div>
+            </div>
+
+            <!-- Create Dataset Modal -->
+            <div id="create-dataset-modal" class="hidden fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center z-50">
+                <div class="glass-card rounded-2xl p-6 w-full max-w-md shadow-2xl">
+                    <h3 class="text-xl font-bold text-white mb-4">Create ZFS Dataset</h3>
+                    <form onsubmit="createDataset(event)">
+                        <div class="mb-4">
+                            <label class="block mb-2 text-sm font-semibold text-slate-300">Parent ZFS Pool</label>
+                            <select id="dataset-pool" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:border-cyan-500 focus:outline-none" required></select>
+                        </div>
+                        <div class="mb-5">
+                            <label class="block mb-2 text-sm font-semibold text-slate-300">Dataset Name</label>
+                            <input type="text" id="dataset-name" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:border-cyan-500 focus:outline-none" placeholder="e.g., downloads" required>
+                        </div>
+                        <div class="flex gap-2">
+                            <button type="submit" class="bg-cyan-500 hover:bg-cyan-600 text-slate-950 font-bold px-5 py-2.5 rounded-xl transition-all">Create Dataset</button>
+                            <button type="button" onclick="hideCreateDataset()" class="bg-slate-800 hover:bg-slate-750 text-slate-300 px-5 py-2.5 rounded-xl transition-all">Cancel</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+
+            <!-- Create Snapshot Modal -->
+            <div id="create-snapshot-modal" class="hidden fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center z-50">
+                <div class="glass-card rounded-2xl p-6 w-full max-w-md shadow-2xl">
+                    <h3 class="text-xl font-bold text-white mb-4">Take ZFS Snapshot</h3>
+                    <form onsubmit="createSnapshot(event)">
+                        <div class="mb-4">
+                            <label class="block mb-2 text-sm font-semibold text-slate-300">Target Dataset / Pool</label>
+                            <select id="snapshot-dataset" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:border-cyan-500 focus:outline-none" required></select>
+                        </div>
+                        <div class="mb-5">
+                            <label class="block mb-2 text-sm font-semibold text-slate-300">Snapshot Name (Label)</label>
+                            <input type="text" id="snapshot-name" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:border-cyan-500 focus:outline-none" placeholder="e.g., daily_backup" required>
+                        </div>
+                        <div class="flex gap-2">
+                            <button type="submit" class="bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-bold px-5 py-2.5 rounded-xl transition-all">Take Snapshot</button>
+                            <button type="button" onclick="hideCreateSnapshot()" class="bg-slate-800 hover:bg-slate-750 text-slate-300 px-5 py-2.5 rounded-xl transition-all">Cancel</button>
+                        </div>
+                    </form>
                 </div>
             </div>
         </div>

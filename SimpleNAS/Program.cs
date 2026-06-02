@@ -149,7 +149,17 @@ app.MapGet("/api/disks", () =>
 app.MapGet("/api/zfs/pools", () =>
 {
     try {
-        var output = RunCommand("zpool", "list", "-H");
+        string output;
+        if (OperatingSystem.IsLinux()) {
+            output = RunCommand("zpool", "list", "-H");
+        } else {
+            var path = GetPoolsFilePath();
+            if (!File.Exists(path)) {
+                File.WriteAllText(path, "tank\t2.0T\t650G\t1.35T\t-\t0%\t32%\t1.00x\tONLINE\t-\n");
+            }
+            output = File.ReadAllText(path);
+        }
+
         if (string.IsNullOrWhiteSpace(output))
             return Results.Json(new { pools = Array.Empty<object>() });
         
@@ -176,21 +186,85 @@ app.MapPost("/api/zfs/pools", async (HttpContext context) =>
 {
     var request = await context.Request.ReadFromJsonAsync<ZfsPoolRequest>();
     if (request == null) return Results.BadRequest();
-    var args = new List<string> { "create", request.Name };
-    if (request.VdevType != "stripe") args.Add(request.VdevType);
-    args.AddRange(request.Devices);
-    RunCommand("zpool", args.ToArray());
+    
+    if (OperatingSystem.IsLinux()) {
+        var args = new List<string> { "create", request.Name };
+        if (request.VdevType != "stripe") args.Add(request.VdevType);
+        args.AddRange(request.Devices);
+        RunCommand("zpool", args.ToArray());
+    } else {
+        var path = GetPoolsFilePath();
+        var size = "2.0T"; // default mock size
+        File.AppendAllText(path, $"{request.Name}\t{size}\t0B\t{size}\t-\t0%\t0%\t1.00x\tONLINE\t-\n");
+
+        // Automatically create a root dataset for the pool in datasets
+        var dsPath = GetDatasetsFilePath();
+        if (!File.Exists(dsPath)) {
+            File.WriteAllText(dsPath, "tank\t650G\t1.35T\t/tank\ntank/media\t450G\t1.35T\t/tank/media\ntank/backups\t200G\t1.35T\t/tank/backups\n");
+        }
+        File.AppendAllText(dsPath, $"{request.Name}\t0B\t{size}\t/{request.Name}\n");
+
+        // Remove used devices from mock devices
+        var devPath = GetDevicesFilePath();
+        if (File.Exists(devPath)) {
+            var lines = File.ReadAllLines(devPath);
+            var updatedLines = lines.Where(l => {
+                var parts = l.Split('\t');
+                if (parts.Length > 0) {
+                    var fullName = "/dev/" + parts[0];
+                    return !request.Devices.Contains(fullName);
+                }
+                return true;
+            });
+            File.WriteAllLines(devPath, updatedLines);
+        }
+    }
     return Results.Ok(new { status = "created" });
+});
+
+app.MapDelete("/api/zfs/pools/{name}", (string name) =>
+{
+    if (string.IsNullOrWhiteSpace(name)) return Results.BadRequest();
+
+    if (OperatingSystem.IsLinux()) {
+        RunCommand("zpool", "destroy", name);
+    } else {
+        var path = GetPoolsFilePath();
+        if (File.Exists(path)) {
+            var lines = File.ReadAllLines(path).Where(l => !l.StartsWith(name + "\t")).ToList();
+            File.WriteAllLines(path, lines);
+        }
+        // Also remove datasets belonging to this pool
+        var dsPath = GetDatasetsFilePath();
+        if (File.Exists(dsPath)) {
+            var lines = File.ReadAllLines(dsPath).Where(l => !l.StartsWith(name + "\t") && !l.StartsWith(name + "/")).ToList();
+            File.WriteAllLines(dsPath, lines);
+        }
+        // Restore mock devices
+        var devPath = GetDevicesFilePath();
+        File.WriteAllText(devPath, "sdb\t2.0T\tdisk\nsdc\t2.0T\tdisk\nsdd\t2.0T\tdisk\n");
+    }
+    return Results.Ok(new { success = true });
 });
 
 app.MapGet("/api/zfs/devices", () =>
 {
     try {
-        var output = RunCommand("lsblk", "-d", "-n", "-o", "NAME,SIZE,TYPE");
+        string output;
+        if (OperatingSystem.IsLinux()) {
+            output = RunCommand("lsblk", "-d", "-n", "-o", "NAME,SIZE,TYPE");
+        } else {
+            var path = GetDevicesFilePath();
+            if (!File.Exists(path)) {
+                File.WriteAllText(path, "sdb\t2.0T\tdisk\nsdc\t2.0T\tdisk\nsdd\t2.0T\tdisk\n");
+            }
+            output = File.ReadAllText(path);
+        }
+
         var devices = output.Split('\n', StringSplitOptions.RemoveEmptyEntries)
-            .Select(line => line.Split((char[])null, StringSplitOptions.RemoveEmptyEntries))
-            .Where(fields => fields.Length >= 3 && fields[2] == "disk")
-            .Select(fields => new { name = "/dev/" + fields[0], size = fields[1] })
+            .Select(line => line.Split('\t', StringSplitOptions.RemoveEmptyEntries))
+            .Where(fields => fields.Length >= 3 && fields[2].Trim() == "disk")
+            .Select(fields => new { name = "/dev/" + fields[0].Trim(), size = fields[1].Trim() })
             .ToList();
         return Results.Ok(new { devices });
     } catch {
@@ -425,7 +499,17 @@ app.MapPost("/api/system/services/control", async (HttpContext context) =>
 app.MapGet("/api/zfs/datasets", () =>
 {
     try {
-        var output = RunCommand("zfs", "list", "-H");
+        string output;
+        if (OperatingSystem.IsLinux()) {
+            output = RunCommand("zfs", "list", "-H");
+        } else {
+            var path = GetDatasetsFilePath();
+            if (!File.Exists(path)) {
+                File.WriteAllText(path, "tank\t650G\t1.35T\t/tank\ntank/media\t450G\t1.35T\t/tank/media\ntank/backups\t200G\t1.35T\t/tank/backups\n");
+            }
+            output = File.ReadAllText(path);
+        }
+
         if (string.IsNullOrWhiteSpace(output))
             return Results.Ok(new { datasets = Array.Empty<object>() });
 
@@ -444,6 +528,153 @@ app.MapGet("/api/zfs/datasets", () =>
         return Results.Ok(new { datasets = Array.Empty<object>() });
     }
 });
+
+app.MapPost("/api/zfs/datasets", async (HttpContext context) =>
+{
+    var request = await context.Request.ReadFromJsonAsync<CreateDatasetRequest>();
+    if (request == null || string.IsNullOrWhiteSpace(request.Pool) || string.IsNullOrWhiteSpace(request.Name))
+        return Results.BadRequest(new { error = "Invalid dataset parameters" });
+
+    var fullName = $"{request.Pool}/{request.Name}";
+    if (OperatingSystem.IsLinux()) {
+        RunCommand("zfs", "create", fullName);
+    } else {
+        var path = GetDatasetsFilePath();
+        var mountpoint = $"/{fullName}";
+        File.AppendAllText(path, $"{fullName}\t0B\t1.35T\t{mountpoint}\n");
+    }
+    return Results.Ok(new { success = true });
+});
+
+app.MapDelete("/api/zfs/datasets/{*name}", (string name) =>
+{
+    if (string.IsNullOrWhiteSpace(name)) return Results.BadRequest();
+
+    if (OperatingSystem.IsLinux()) {
+        RunCommand("zfs", "destroy", "-r", name);
+    } else {
+        var path = GetDatasetsFilePath();
+        if (File.Exists(path)) {
+            var lines = File.ReadAllLines(path).Where(l => {
+                var parts = l.Split('\t');
+                if (parts.Length > 0) {
+                    var dsName = parts[0];
+                    return dsName != name && !dsName.StartsWith(name + "/");
+                }
+                return true;
+            }).ToList();
+            File.WriteAllLines(path, lines);
+        }
+        // Also remove snapshots for this dataset
+        var snapPath = GetSnapshotsFilePath();
+        if (File.Exists(snapPath)) {
+            var lines = File.ReadAllLines(snapPath).Where(l => {
+                var parts = l.Split('\t');
+                if (parts.Length > 0) {
+                    return !parts[0].StartsWith(name + "@");
+                }
+                return true;
+            }).ToList();
+            File.WriteAllLines(snapPath, lines);
+        }
+    }
+    return Results.Ok(new { success = true });
+});
+
+app.MapGet("/api/zfs/snapshots", () =>
+{
+    try {
+        string output;
+        if (OperatingSystem.IsLinux()) {
+            output = RunCommand("zfs", "list", "-t", "snapshot", "-H");
+        } else {
+            var path = GetSnapshotsFilePath();
+            if (!File.Exists(path)) {
+                File.WriteAllText(path, "tank/media@backup_2026_06_01\t12M\t-\t450G\t-\ntank/media@backup_2026_06_02\t2M\t-\t450G\t-\n");
+            }
+            output = File.ReadAllText(path);
+        }
+
+        if (string.IsNullOrWhiteSpace(output))
+            return Results.Ok(new { snapshots = Array.Empty<object>() });
+
+        var snapshots = output.Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Select(line => line.Split('\t', StringSplitOptions.RemoveEmptyEntries))
+            .Where(fields => fields.Length >= 4)
+            .Select(fields => new {
+                name = fields[0],      // NAME
+                used = fields[1],      // USED
+                refer = fields[3]      // REFER
+            })
+            .ToList();
+        return Results.Ok(new { snapshots });
+    } catch {
+        return Results.Ok(new { snapshots = Array.Empty<object>() });
+    }
+});
+
+app.MapPost("/api/zfs/snapshots", async (HttpContext context) =>
+{
+    var request = await context.Request.ReadFromJsonAsync<CreateSnapshotRequest>();
+    if (request == null || string.IsNullOrWhiteSpace(request.Dataset) || string.IsNullOrWhiteSpace(request.Name))
+        return Results.BadRequest(new { error = "Invalid snapshot parameters" });
+
+    var fullName = $"{request.Dataset}@{request.Name}";
+    if (OperatingSystem.IsLinux()) {
+        RunCommand("zfs", "snapshot", fullName);
+    } else {
+        var path = GetSnapshotsFilePath();
+        File.AppendAllText(path, $"{fullName}\t0B\t-\t0B\t-\n");
+    }
+    return Results.Ok(new { success = true });
+});
+
+app.MapPost("/api/zfs/snapshots/rollback", async (HttpContext context) =>
+{
+    var request = await context.Request.ReadFromJsonAsync<RollbackSnapshotRequest>();
+    if (request == null || string.IsNullOrWhiteSpace(request.Snapshot))
+        return Results.BadRequest(new { error = "Invalid snapshot parameters" });
+
+    if (OperatingSystem.IsLinux()) {
+        RunCommand("zfs", "rollback", "-r", request.Snapshot);
+    }
+    return Results.Ok(new { success = true });
+});
+
+app.MapDelete("/api/zfs/snapshots/{*name}", (string name) =>
+{
+    if (string.IsNullOrWhiteSpace(name)) return Results.BadRequest();
+
+    if (OperatingSystem.IsLinux()) {
+        RunCommand("zfs", "destroy", name);
+    } else {
+        var path = GetSnapshotsFilePath();
+        if (File.Exists(path)) {
+            var lines = File.ReadAllLines(path).Where(l => {
+                var parts = l.Split('\t');
+                if (parts.Length > 0) {
+                    return parts[0] != name;
+                }
+                return true;
+            }).ToList();
+            File.WriteAllLines(path, lines);
+        }
+    }
+    return Results.Ok(new { success = true });
+});
+
+app.MapPost("/api/zfs/pools/scrub", async (HttpContext context) =>
+{
+    var request = await context.Request.ReadFromJsonAsync<ScrubPoolRequest>();
+    if (request == null || string.IsNullOrWhiteSpace(request.Pool))
+        return Results.BadRequest(new { error = "Invalid pool parameter" });
+
+    if (OperatingSystem.IsLinux()) {
+        RunCommand("zpool", "scrub", request.Pool);
+    }
+    return Results.Ok(new { success = true });
+});
+
 
 // Firewall status API
 app.MapGet("/api/network/firewall", () =>
@@ -634,6 +865,11 @@ string GetUsersFilePath()
     return Path.Combine(Directory.GetCurrentDirectory(), "users.txt");
 }
 
+string GetDevicesFilePath() => Path.Combine(Directory.GetCurrentDirectory(), "mock_devices.txt");
+string GetPoolsFilePath() => Path.Combine(Directory.GetCurrentDirectory(), "mock_pools.txt");
+string GetDatasetsFilePath() => Path.Combine(Directory.GetCurrentDirectory(), "mock_datasets.txt");
+string GetSnapshotsFilePath() => Path.Combine(Directory.GetCurrentDirectory(), "mock_snapshots.txt");
+
 // File Path Helpers
 string GetSmbConfPath()
 {
@@ -800,3 +1036,7 @@ record FirewallToggleRequest(bool Enable);
 record WhitelistRequest(string Ip, int Port, string Comment);
 record CreateUserRequest(string Username, string Password);
 record ImportPoolRequest(string Name);
+record CreateDatasetRequest(string Pool, string Name);
+record CreateSnapshotRequest(string Dataset, string Name);
+record RollbackSnapshotRequest(string Snapshot);
+record ScrubPoolRequest(string Pool);
