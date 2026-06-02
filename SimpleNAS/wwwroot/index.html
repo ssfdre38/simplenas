@@ -3,189 +3,387 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SimpleNAS - Simple NAS Management</title>
+    <title>SimpleNAS - Premium NAS Dashboard</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        .nav-active { @apply bg-blue-600 text-white; }
-        .card { @apply bg-white rounded-lg shadow p-6 mb-4; }
+        @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap');
+        body {
+            font-family: 'Outfit', sans-serif;
+        }
+        .glass-card {
+            background: rgba(15, 23, 42, 0.65);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(51, 65, 85, 0.4);
+        }
+        .nav-active {
+            background: rgba(6, 182, 212, 0.15);
+            color: rgb(34, 211, 238);
+            border: 1px solid rgba(6, 182, 212, 0.3);
+        }
+        /* Circular progress styling */
+        .circle-bg {
+            fill: none;
+            stroke: rgba(51, 65, 85, 0.3);
+            stroke-width: 8;
+        }
+        .circle-progress {
+            fill: none;
+            stroke-width: 8;
+            stroke-linecap: round;
+            transition: stroke-dashoffset 0.6s ease-out;
+        }
+        /* Custom switches */
+        .switch-input:checked ~ .switch-label {
+            background-color: #06b6d4;
+        }
+        .switch-input:checked ~ .switch-label .switch-dot {
+            transform: translateX(100%);
+        }
     </style>
 </head>
-<body class="bg-gray-100">
-    <nav class="bg-gray-800 text-white p-4">
-        <div class="container mx-auto flex justify-between items-center">
-            <h1 class="text-2xl font-bold">SimpleNAS</h1>
-            <div class="space-x-4">
-                <button onclick="showTab('dashboard')" class="nav-btn px-4 py-2 rounded" data-tab="dashboard">Dashboard</button>
-                <button onclick="showTab('zfs')" class="nav-btn px-4 py-2 rounded" data-tab="zfs">ZFS</button>
-                <button onclick="showTab('shares')" class="nav-btn px-4 py-2 rounded" data-tab="shares">Shares</button>
-                <button onclick="showTab('network')" class="nav-btn px-4 py-2 rounded" data-tab="network">Network</button>
+<body class="bg-slate-950 text-slate-100 min-h-screen">
+    <!-- Header Navigation -->
+    <nav class="sticky top-0 z-40 bg-slate-950/85 backdrop-blur-md border-b border-slate-900 text-slate-100 px-6 py-4">
+        <div class="max-w-7xl mx-auto flex justify-between items-center">
+            <div class="flex items-center space-x-3">
+                <div class="bg-gradient-to-tr from-cyan-500 to-blue-600 p-2 rounded-xl shadow-lg shadow-cyan-500/20">
+                    <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path>
+                    </svg>
+                </div>
+                <div>
+                    <h1 class="text-2xl font-extrabold tracking-tight bg-gradient-to-r from-white via-slate-200 to-cyan-400 bg-clip-text text-transparent">SimpleNAS</h1>
+                    <p class="text-[10px] text-cyan-500 font-mono tracking-widest uppercase">Management Panel</p>
+                </div>
+            </div>
+            
+            <div class="flex space-x-2 bg-slate-900/60 p-1.5 rounded-xl border border-slate-800/80">
+                <button onclick="showTab('dashboard')" class="nav-btn px-4 py-2 text-sm font-semibold rounded-lg text-slate-400 hover:text-white transition-all duration-200 border border-transparent" data-tab="dashboard">Dashboard</button>
+                <button onclick="showTab('zfs')" class="nav-btn px-4 py-2 text-sm font-semibold rounded-lg text-slate-400 hover:text-white transition-all duration-200 border border-transparent" data-tab="zfs">ZFS Storage</button>
+                <button onclick="showTab('shares')" class="nav-btn px-4 py-2 text-sm font-semibold rounded-lg text-slate-400 hover:text-white transition-all duration-200 border border-transparent" data-tab="shares">File Shares</button>
+                <button onclick="showTab('network')" class="nav-btn px-4 py-2 text-sm font-semibold rounded-lg text-slate-400 hover:text-white transition-all duration-200 border border-transparent" data-tab="network">Network</button>
             </div>
         </div>
     </nav>
 
-    <div class="container mx-auto p-6">
-        <!-- Dashboard Tab -->
-        <div id="tab-dashboard" class="tab-content">
-            <h2 class="text-3xl font-bold mb-6">System Status</h2>
+    <div class="max-w-7xl mx-auto p-6 space-y-6">
+        
+        <!-- DASHBOARD TAB -->
+        <div id="tab-dashboard" class="tab-content space-y-6">
+            <div class="flex justify-between items-center">
+                <div>
+                    <h2 class="text-3xl font-bold tracking-tight text-white">System Status</h2>
+                    <p class="text-slate-400 text-sm">Real-time resource utilization and hardware health</p>
+                </div>
+                <div class="flex items-center space-x-2 text-sm font-mono text-cyan-400 bg-cyan-500/10 px-3 py-1.5 rounded-lg border border-cyan-500/20">
+                    <span class="w-2 h-2 rounded-full bg-cyan-500 animate-pulse"></span>
+                    <span>Monitoring Live</span>
+                </div>
+            </div>
             
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-                <div class="card">
-                    <h3 class="text-lg font-semibold mb-2">CPU</h3>
-                    <p class="text-3xl font-bold text-blue-600" id="cpu-usage">--%</p>
+            <!-- Gauges Grid -->
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <!-- CPU GAUGE -->
+                <div class="glass-card rounded-2xl p-6 shadow-xl flex items-center justify-between">
+                    <div>
+                        <p class="text-slate-400 text-xs font-mono uppercase tracking-wider">Processor</p>
+                        <h3 class="text-xl font-bold text-white mt-1">CPU Load</h3>
+                        <p class="text-sm text-slate-400 mt-2" id="cpu-core-details">Active Threads</p>
+                    </div>
+                    <div class="relative w-28 h-28 flex items-center justify-center">
+                        <svg class="w-full h-full transform -rotate-90">
+                            <circle cx="56" cy="56" r="48" class="circle-bg" />
+                            <circle cx="56" cy="56" r="48" class="circle-progress stroke-cyan-500" stroke-dasharray="301.5" stroke-dashoffset="301.5" id="cpu-circle" />
+                        </svg>
+                        <span class="absolute text-2xl font-extrabold text-white" id="cpu-usage">--%</span>
+                    </div>
                 </div>
-                <div class="card">
-                    <h3 class="text-lg font-semibold mb-2">Memory</h3>
-                    <p class="text-3xl font-bold text-green-600" id="mem-usage">--%</p>
+                <!-- MEMORY GAUGE -->
+                <div class="glass-card rounded-2xl p-6 shadow-xl flex items-center justify-between">
+                    <div>
+                        <p class="text-slate-400 text-xs font-mono uppercase tracking-wider">Memory</p>
+                        <h3 class="text-xl font-bold text-white mt-1">RAM Usage</h3>
+                        <p class="text-sm text-slate-400 mt-2" id="mem-ram-details">Available Memory</p>
+                    </div>
+                    <div class="relative w-28 h-28 flex items-center justify-center">
+                        <svg class="w-full h-full transform -rotate-90">
+                            <circle cx="56" cy="56" r="48" class="circle-bg" />
+                            <circle cx="56" cy="56" r="48" class="circle-progress stroke-emerald-500" stroke-dasharray="301.5" stroke-dashoffset="301.5" id="mem-circle" />
+                        </svg>
+                        <span class="absolute text-2xl font-extrabold text-white" id="mem-usage">--%</span>
+                    </div>
                 </div>
-                <div class="card">
-                    <h3 class="text-lg font-semibold mb-2">Disk</h3>
-                    <p class="text-3xl font-bold text-orange-600" id="disk-usage">--%</p>
+                <!-- DISK GAUGE -->
+                <div class="glass-card rounded-2xl p-6 shadow-xl flex items-center justify-between">
+                    <div>
+                        <p class="text-slate-400 text-xs font-mono uppercase tracking-wider">Primary Pool</p>
+                        <h3 class="text-xl font-bold text-white mt-1">OS Storage</h3>
+                        <p class="text-sm text-slate-400 mt-2" id="disk-pool-details">Mounted Root</p>
+                    </div>
+                    <div class="relative w-28 h-28 flex items-center justify-center">
+                        <svg class="w-full h-full transform -rotate-90">
+                            <circle cx="56" cy="56" r="48" class="circle-bg" />
+                            <circle cx="56" cy="56" r="48" class="circle-progress stroke-amber-500" stroke-dasharray="301.5" stroke-dashoffset="301.5" id="disk-circle" />
+                        </svg>
+                        <span class="absolute text-2xl font-extrabold text-white" id="disk-usage">--%</span>
+                    </div>
                 </div>
             </div>
 
-            <div class="card">
-                <h3 class="text-xl font-semibold mb-4">Services</h3>
-                <div id="services-list" class="space-y-2"></div>
+            <!-- SERVICE CONTROL CENTER -->
+            <div class="glass-card rounded-2xl p-6 shadow-xl">
+                <div class="flex items-center space-x-2 mb-6">
+                    <svg class="w-5 h-5 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                    </svg>
+                    <h3 class="text-xl font-bold text-white">Service Control Center</h3>
+                </div>
+                <div id="services-list" class="grid grid-cols-1 md:grid-cols-2 gap-4"></div>
             </div>
         </div>
 
-        <!-- ZFS Tab -->
-        <div id="tab-zfs" class="tab-content hidden">
-            <h2 class="text-3xl font-bold mb-6">ZFS Pools</h2>
+        <!-- ZFS TAB -->
+        <div id="tab-zfs" class="tab-content hidden space-y-6">
+            <div class="flex justify-between items-center">
+                <div>
+                    <h2 class="text-3xl font-bold tracking-tight text-white">ZFS Storage Center</h2>
+                    <p class="text-slate-400 text-sm">Manage ZFS RAID pools, datasets, and logical disks</p>
+                </div>
+                <button onclick="showCreatePool()" class="bg-cyan-500 hover:bg-cyan-600 text-slate-950 font-bold px-5 py-2.5 rounded-xl shadow-lg shadow-cyan-500/10 transition-all duration-200">
+                    Create New Pool
+                </button>
+            </div>
             
-            <button onclick="showCreatePool()" class="bg-blue-600 text-white px-4 py-2 rounded mb-4">
-                Create Pool
-            </button>
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <!-- Pools list (2/3 width) -->
+                <div class="lg:col-span-2 space-y-6">
+                    <div class="glass-card rounded-2xl p-6 shadow-xl">
+                        <h3 class="text-xl font-bold text-white mb-4 flex items-center space-x-2">
+                            <span class="w-2.5 h-2.5 rounded-full bg-cyan-500"></span>
+                            <span>ZFS Pools</span>
+                        </h3>
+                        <div id="pools-list" class="space-y-4"></div>
+                    </div>
 
-            <div id="pools-list" class="space-y-4"></div>
+                    <div class="glass-card rounded-2xl p-6 shadow-xl">
+                        <h3 class="text-xl font-bold text-white mb-4 flex items-center space-x-2">
+                            <span class="w-2.5 h-2.5 rounded-full bg-cyan-500"></span>
+                            <span>ZFS Datasets & Mounts</span>
+                        </h3>
+                        <div id="datasets-list" class="overflow-x-auto">
+                            <p class="text-slate-500 text-sm">No datasets found</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Available Disks (1/3 width) -->
+                <div class="glass-card rounded-2xl p-6 shadow-xl h-fit">
+                    <h3 class="text-xl font-bold text-white mb-4 flex items-center space-x-2">
+                        <span class="w-2.5 h-2.5 rounded-full bg-amber-500"></span>
+                        <span>Available Drive Grid</span>
+                    </h3>
+                    <div id="available-disks" class="space-y-3">
+                        <p class="text-slate-500 text-sm">Scanning for raw disks...</p>
+                    </div>
+                </div>
+            </div>
 
             <!-- Create Pool Modal -->
-            <div id="create-pool-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
-                <div class="bg-white rounded-lg p-6 w-full max-w-md">
-                    <h3 class="text-xl font-bold mb-4">Create ZFS Pool</h3>
+            <div id="create-pool-modal" class="hidden fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center z-50">
+                <div class="glass-card rounded-2xl p-6 w-full max-w-md shadow-2xl">
+                    <h3 class="text-xl font-bold text-white mb-4">Create ZFS Pool</h3>
                     <form onsubmit="createPool(event)">
                         <div class="mb-4">
-                            <label class="block mb-2">Pool Name</label>
-                            <input type="text" id="pool-name" class="w-full border rounded px-3 py-2" required>
+                            <label class="block mb-2 text-sm font-semibold text-slate-300">Pool Name</label>
+                            <input type="text" id="pool-name" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:border-cyan-500 focus:outline-none" placeholder="tank" required>
                         </div>
                         <div class="mb-4">
-                            <label class="block mb-2">VDEV Type</label>
-                            <select id="pool-type" class="w-full border rounded px-3 py-2">
-                                <option value="stripe">Stripe (RAID0)</option>
-                                <option value="mirror">Mirror (RAID1)</option>
-                                <option value="raidz">RAIDZ (RAID5)</option>
-                                <option value="raidz2">RAIDZ2 (RAID6)</option>
+                            <label class="block mb-2 text-sm font-semibold text-slate-300">VDEV Layout</label>
+                            <select id="pool-type" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:border-cyan-500 focus:outline-none">
+                                <option value="stripe">Stripe (RAID0) - Fast, No Redundancy</option>
+                                <option value="mirror">Mirror (RAID1) - Dual Disk Protection</option>
+                                <option value="raidz">RAIDZ (RAID5) - Single Disk Parity</option>
+                                <option value="raidz2">RAIDZ2 (RAID6) - Dual Disk Parity</option>
                             </select>
                         </div>
-                        <div class="mb-4">
-                            <label class="block mb-2">Devices</label>
-                            <div id="devices-list" class="space-y-2"></div>
+                        <div class="mb-5">
+                            <label class="block mb-2 text-sm font-semibold text-slate-300">Target Hard Drives</label>
+                            <div id="devices-list" class="space-y-2 bg-slate-900/60 p-3 rounded-xl border border-slate-800 max-h-48 overflow-y-auto"></div>
                         </div>
                         <div class="flex gap-2">
-                            <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded">Create</button>
-                            <button type="button" onclick="hideCreatePool()" class="bg-gray-300 px-4 py-2 rounded">Cancel</button>
+                            <button type="submit" class="bg-cyan-500 hover:bg-cyan-600 text-slate-950 font-bold px-5 py-2.5 rounded-xl transition-all">Create Pool</button>
+                            <button type="button" onclick="hideCreatePool()" class="bg-slate-800 hover:bg-slate-750 text-slate-300 px-5 py-2.5 rounded-xl transition-all">Cancel</button>
                         </div>
                     </form>
                 </div>
             </div>
         </div>
 
-        <!-- Shares Tab -->
-        <div id="tab-shares" class="tab-content hidden">
-            <h2 class="text-3xl font-bold mb-6">File Shares</h2>
+        <!-- SHARES TAB -->
+        <div id="tab-shares" class="tab-content hidden space-y-6">
+            <div>
+                <h2 class="text-3xl font-bold tracking-tight text-white">File Share Configurator</h2>
+                <p class="text-slate-400 text-sm">Configure network folders using Samba (Windows SMB) and NFS (Linux)</p>
+            </div>
             
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div>
-                    <h3 class="text-xl font-semibold mb-4">SMB Shares</h3>
-                    <button onclick="showCreateSMB()" class="bg-blue-600 text-white px-4 py-2 rounded mb-4">
-                        New SMB Share
-                    </button>
-                    <div id="smb-list" class="space-y-2"></div>
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <!-- SMB Shares -->
+                <div class="glass-card rounded-2xl p-6 shadow-xl space-y-4">
+                    <div class="flex justify-between items-center">
+                        <h3 class="text-xl font-bold text-white flex items-center space-x-2">
+                            <svg class="w-5 h-5 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path>
+                            </svg>
+                            <span>SMB Shares</span>
+                        </h3>
+                        <button onclick="showCreateSMB()" class="bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 border border-cyan-500/20 text-xs font-semibold px-3 py-1.5 rounded-lg transition-all">
+                            + New SMB Share
+                        </button>
+                    </div>
+                    <div id="smb-list" class="space-y-3"></div>
                 </div>
-                <div>
-                    <h3 class="text-xl font-semibold mb-4">NFS Exports</h3>
-                    <button onclick="showCreateNFS()" class="bg-blue-600 text-white px-4 py-2 rounded mb-4">
-                        New NFS Export
-                    </button>
-                    <div id="nfs-list" class="space-y-2"></div>
+
+                <!-- NFS Exports -->
+                <div class="glass-card rounded-2xl p-6 shadow-xl space-y-4">
+                    <div class="flex justify-between items-center">
+                        <h3 class="text-xl font-bold text-white flex items-center space-x-2">
+                            <svg class="w-5 h-5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 4H6a2 2 0 00-2 2v12a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-2m-4-1v8m0 0l3-3m-3 3L9 8m-5 5h2.586a1 1 0 01.707.293l2.414 2.414a1 1 0 00.707.293h3.172a1 1 0 00.707-.293l2.414-2.414a1 1 0 01.707-.293H20"></path>
+                            </svg>
+                            <span>NFS Exports</span>
+                        </h3>
+                        <button onclick="showCreateNFS()" class="bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 text-xs font-semibold px-3 py-1.5 rounded-lg transition-all">
+                            + New NFS Export
+                        </button>
+                    </div>
+                    <div id="nfs-list" class="space-y-3"></div>
                 </div>
             </div>
 
             <!-- Create SMB Share Modal -->
-            <div id="create-smb-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-                <div class="bg-white rounded-lg p-6 w-full max-w-md">
-                    <h3 class="text-xl font-bold mb-4 text-gray-800">New SMB Share</h3>
+            <div id="create-smb-modal" class="hidden fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center z-50">
+                <div class="glass-card rounded-2xl p-6 w-full max-w-md shadow-2xl">
+                    <h3 class="text-xl font-bold text-white mb-4">Create SMB Share</h3>
                     <form onsubmit="createSMB(event)">
                         <div class="mb-4">
-                            <label class="block mb-2 text-sm font-semibold text-gray-700">Share Name</label>
-                            <input type="text" id="smb-name" class="w-full border rounded px-3 py-2" placeholder="e.g., storage" required>
+                            <label class="block mb-2 text-sm font-semibold text-slate-300">Share Name</label>
+                            <input type="text" id="smb-name" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:border-cyan-500 focus:outline-none" placeholder="storage" required>
                         </div>
                         <div class="mb-4">
-                            <label class="block mb-2 text-sm font-semibold text-gray-700">Directory Path</label>
-                            <input type="text" id="smb-path" class="w-full border rounded px-3 py-2" placeholder="e.g., /storage" required>
+                            <label class="block mb-2 text-sm font-semibold text-slate-300">Absolute Directory Path</label>
+                            <input type="text" id="smb-path" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:border-cyan-500 focus:outline-none" placeholder="/storage" required>
                         </div>
                         <div class="mb-4 flex items-center">
-                            <input type="checkbox" id="smb-readonly" class="mr-2 h-4 w-4 rounded text-blue-600">
-                            <label for="smb-readonly" class="text-sm font-semibold text-gray-700">Read Only</label>
+                            <input type="checkbox" id="smb-readonly" class="mr-2 h-4 w-4 bg-slate-900 border-slate-700 text-cyan-500 rounded">
+                            <label for="smb-readonly" class="text-sm font-semibold text-slate-300">Read Only</label>
                         </div>
-                        <div class="mb-4 flex items-center">
-                            <input type="checkbox" id="smb-guestok" class="mr-2 h-4 w-4 rounded text-blue-600" checked>
-                            <label for="smb-guestok" class="text-sm font-semibold text-gray-700">Allow Guest Access</label>
+                        <div class="mb-5 flex items-center">
+                            <input type="checkbox" id="smb-guestok" class="mr-2 h-4 w-4 bg-slate-900 border-slate-700 text-cyan-500 rounded" checked>
+                            <label for="smb-guestok" class="text-sm font-semibold text-slate-300">Allow Guest/Anonymous Login</label>
                         </div>
                         <div class="flex gap-2">
-                            <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded font-semibold hover:bg-blue-700">Create</button>
-                            <button type="button" onclick="hideCreateSMB()" class="bg-gray-300 px-4 py-2 rounded font-semibold hover:bg-gray-400">Cancel</button>
+                            <button type="submit" class="bg-cyan-500 hover:bg-cyan-600 text-slate-950 font-bold px-5 py-2.5 rounded-xl transition-all">Create SMB</button>
+                            <button type="button" onclick="hideCreateSMB()" class="bg-slate-800 hover:bg-slate-750 text-slate-300 px-5 py-2.5 rounded-xl transition-all">Cancel</button>
                         </div>
                     </form>
                 </div>
             </div>
 
             <!-- Create NFS Export Modal -->
-            <div id="create-nfs-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-                <div class="bg-white rounded-lg p-6 w-full max-w-md">
-                    <h3 class="text-xl font-bold mb-4 text-gray-800">New NFS Export</h3>
+            <div id="create-nfs-modal" class="hidden fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center z-50">
+                <div class="glass-card rounded-2xl p-6 w-full max-w-md shadow-2xl">
+                    <h3 class="text-xl font-bold text-white mb-4">Export NFS Directory</h3>
                     <form onsubmit="createNFS(event)">
                         <div class="mb-4">
-                            <label class="block mb-2 text-sm font-semibold text-gray-700">Export Directory Path</label>
-                            <input type="text" id="nfs-path" class="w-full border rounded px-3 py-2" placeholder="e.g., /storage" required>
+                            <label class="block mb-2 text-sm font-semibold text-slate-300">Export Path</label>
+                            <input type="text" id="nfs-path" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:border-cyan-500 focus:outline-none" placeholder="/storage" required>
                         </div>
                         <div class="mb-4">
-                            <label class="block mb-2 text-sm font-semibold text-gray-700">Allowed Clients (IP or subnet)</label>
-                            <input type="text" id="nfs-clients" class="w-full border rounded px-3 py-2" placeholder="e.g., *, 100.64.0.0/10" required>
+                            <label class="block mb-2 text-sm font-semibold text-slate-300">Allowed Clients IP/Subnet</label>
+                            <input type="text" id="nfs-clients" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:border-cyan-500 focus:outline-none" placeholder="*, 100.64.0.0/10" required>
                         </div>
-                        <div class="mb-4">
-                            <label class="block mb-2 text-sm font-semibold text-gray-700">Mount Options</label>
-                            <input type="text" id="nfs-options" class="w-full border rounded px-3 py-2" value="rw,sync,no_subtree_check" required>
+                        <div class="mb-5">
+                            <label class="block mb-2 text-sm font-semibold text-slate-300">Mount Export Options</label>
+                            <input type="text" id="nfs-options" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:border-cyan-500 focus:outline-none" value="rw,sync,no_subtree_check" required>
                         </div>
                         <div class="flex gap-2">
-                            <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded font-semibold hover:bg-blue-700">Export</button>
-                            <button type="button" onclick="hideCreateNFS()" class="bg-gray-300 px-4 py-2 rounded font-semibold hover:bg-gray-400">Cancel</button>
+                            <button type="submit" class="bg-cyan-500 hover:bg-cyan-600 text-slate-950 font-bold px-5 py-2.5 rounded-xl transition-all">Export NFS</button>
+                            <button type="button" onclick="hideCreateNFS()" class="bg-slate-800 hover:bg-slate-750 text-slate-300 px-5 py-2.5 rounded-xl transition-all">Cancel</button>
                         </div>
                     </form>
                 </div>
             </div>
         </div>
 
-        <!-- Network Tab -->
-        <div id="tab-network" class="tab-content hidden">
-            <h2 class="text-3xl font-bold mb-6">Network & VPN</h2>
-            
-            <div class="card">
-                <h3 class="text-xl font-semibold mb-4">Tailscale</h3>
-                <div id="tailscale-status" class="mb-4">
-                    <p>Checking status...</p>
-                </div>
-                <button onclick="startTailscale()" class="bg-green-600 text-white px-4 py-2 rounded mr-2">
-                    Start
-                </button>
-                <button onclick="stopTailscale()" class="bg-red-600 text-white px-4 py-2 rounded">
-                    Stop
-                </button>
+        <!-- NETWORK TAB -->
+        <div id="tab-network" class="tab-content hidden space-y-6">
+            <div>
+                <h2 class="text-3xl font-bold tracking-tight text-white">Network & Firewall</h2>
+                <p class="text-slate-400 text-sm">Manage network adapters, secure Tailscale tunnels, and the UFW firewall</p>
             </div>
+            
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <!-- Tailscale and Firewall (2/3 width) -->
+                <div class="lg:col-span-2 space-y-6">
+                    <!-- Tailscale -->
+                    <div class="glass-card rounded-2xl p-6 shadow-xl flex items-center justify-between">
+                        <div class="flex items-center space-x-4">
+                            <div class="p-3 bg-slate-900 rounded-2xl border border-slate-800">
+                                <svg class="w-8 h-8 text-cyan-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <circle cx="12" cy="12" r="9"></circle>
+                                    <circle cx="12" cy="12" r="3"></circle>
+                                    <path d="M12 3v6M12 15v6M3 12h6M15 12h6"></path>
+                                </svg>
+                            </div>
+                            <div>
+                                <h3 class="text-xl font-bold text-white">Tailscale Mesh VPN</h3>
+                                <p class="text-slate-400 text-sm mt-1">Connect privately and bypass firewalls</p>
+                                <div id="tailscale-status" class="mt-2 text-sm font-semibold"></div>
+                            </div>
+                        </div>
+                        <div class="flex space-x-2">
+                            <button onclick="startTailscale()" class="bg-cyan-500 hover:bg-cyan-600 text-slate-950 font-bold px-4 py-2 rounded-xl transition-all">
+                                Start
+                            </button>
+                            <button onclick="stopTailscale()" class="bg-slate-800 hover:bg-slate-750 text-slate-300 px-4 py-2 rounded-xl transition-all">
+                                Stop
+                            </button>
+                        </div>
+                    </div>
 
-            <div class="card">
-                <h3 class="text-xl font-semibold mb-4">Network Interfaces</h3>
-                <div id="interfaces-list"></div>
+                    <!-- UFW Firewall -->
+                    <div class="glass-card rounded-2xl p-6 shadow-xl flex items-center justify-between">
+                        <div class="flex items-center space-x-4">
+                            <div class="p-3 bg-slate-900 rounded-2xl border border-slate-800">
+                                <svg class="w-8 h-8 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path>
+                                </svg>
+                            </div>
+                            <div>
+                                <h3 class="text-xl font-bold text-white">UFW Security Firewall</h3>
+                                <p class="text-slate-400 text-sm mt-1">Control incoming network ports and block bots</p>
+                                <div id="firewall-status" class="mt-2 text-sm font-semibold"></div>
+                            </div>
+                        </div>
+                        <div class="flex items-center">
+                            <input type="checkbox" id="firewall-toggle" onchange="toggleFirewall(this)" class="hidden switch-input" />
+                            <label for="firewall-toggle" class="switch-label relative inline-block w-14 h-8 bg-slate-800 border border-slate-700 rounded-full cursor-pointer transition-all duration-300">
+                                <span class="switch-dot absolute top-0.5 left-0.5 inline-block w-6.5 h-6.5 bg-white rounded-full transition-transform duration-300 shadow-md"></span>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Network Interfaces (1/3 width) -->
+                <div class="glass-card rounded-2xl p-6 shadow-xl h-fit space-y-4">
+                    <h3 class="text-xl font-bold text-white flex items-center space-x-2">
+                        <span class="w-2.5 h-2.5 rounded-full bg-cyan-500"></span>
+                        <span>Ethernet Adapters</span>
+                    </h3>
+                    <div id="interfaces-list" class="space-y-3"></div>
+                </div>
             </div>
         </div>
     </div>

@@ -398,6 +398,85 @@ app.MapDelete("/api/shares/nfs", async (HttpContext context) =>
     }
 });
 
+// Service controls API
+app.MapPost("/api/system/services/control", async (HttpContext context) =>
+{
+    var request = await context.Request.ReadFromJsonAsync<ServiceControlRequest>();
+    if (request == null || string.IsNullOrWhiteSpace(request.Service) || string.IsNullOrWhiteSpace(request.Action))
+        return Results.BadRequest(new { error = "Invalid request parameters" });
+
+    var allowedServices = new[] { "smbd", "nmbd", "ssh", "tailscaled" };
+    var allowedActions = new[] { "start", "stop", "restart" };
+
+    if (!allowedServices.Contains(request.Service) || !allowedActions.Contains(request.Action))
+        return Results.BadRequest(new { error = "Unauthorized service or action" });
+
+    try {
+        if (OperatingSystem.IsLinux()) {
+            RunCommand("systemctl", request.Action, request.Service);
+        }
+        return Results.Ok(new { success = true });
+    } catch (Exception ex) {
+        return Results.Problem(ex.Message);
+    }
+});
+
+// ZFS datasets API
+app.MapGet("/api/zfs/datasets", () =>
+{
+    try {
+        var output = RunCommand("zfs", "list", "-H");
+        if (string.IsNullOrWhiteSpace(output))
+            return Results.Ok(new { datasets = Array.Empty<object>() });
+
+        var datasets = output.Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Select(line => line.Split('\t', StringSplitOptions.RemoveEmptyEntries))
+            .Where(fields => fields.Length >= 4)
+            .Select(fields => new {
+                name = fields[0],      // NAME
+                used = fields[1],      // USED
+                avail = fields[2],     // AVAIL
+                mountpoint = fields[3] // MOUNTPOINT
+            })
+            .ToList();
+        return Results.Ok(new { datasets });
+    } catch {
+        return Results.Ok(new { datasets = Array.Empty<object>() });
+    }
+});
+
+// Firewall status API
+app.MapGet("/api/network/firewall", () =>
+{
+    try {
+        var output = RunCommand("ufw", "status").Trim();
+        var active = output.Contains("Status: active");
+        return Results.Ok(new { active });
+    } catch {
+        return Results.Ok(new { active = false });
+    }
+});
+
+// Firewall toggle API
+app.MapPost("/api/network/firewall/toggle", async (HttpContext context) =>
+{
+    var request = await context.Request.ReadFromJsonAsync<FirewallToggleRequest>();
+    if (request == null) return Results.BadRequest();
+
+    try {
+        if (OperatingSystem.IsLinux()) {
+            if (request.Enable) {
+                RunCommand("bash", "-c", "echo 'y' | ufw enable");
+            } else {
+                RunCommand("ufw", "disable");
+            }
+        }
+        return Results.Ok(new { success = true });
+    } catch (Exception ex) {
+        return Results.Problem(ex.Message);
+    }
+});
+
 Console.WriteLine("SimpleNAS running on http://0.0.0.0:8000");
 Console.WriteLine("Default login: admin / SimpleNAS2026");
 app.Run();
@@ -563,3 +642,5 @@ record CreateNfsExportRequest(string Path, List<string> Clients, string Options)
 record DeleteNfsExportRequest(string Path);
 record SmbShare(string Name, Dictionary<string, string> Config);
 record NfsExport(string Path, List<string> Clients);
+record ServiceControlRequest(string Service, string Action);
+record FirewallToggleRequest(bool Enable);
