@@ -514,9 +514,125 @@ app.MapPost("/api/network/firewall/whitelist", async (HttpContext context) =>
     }
 });
 
+// User Management APIs
+app.MapGet("/api/users", () =>
+{
+    try {
+        if (OperatingSystem.IsLinux()) {
+            var output = RunCommand("sudo", "pdbedit", "-L");
+            var users = output.Split('\n', StringSplitOptions.RemoveEmptyEntries)
+                .Select(line => {
+                    var parts = line.Split(':');
+                    return new { username = parts[0].Trim() };
+                })
+                .ToList();
+            return Results.Ok(new { users });
+        } else {
+            var path = GetUsersFilePath();
+            var users = File.Exists(path) ? 
+                File.ReadAllLines(path).Select(u => (object)new { username = u.Trim() }).ToList() : 
+                new List<object> { new { username = "ubuntu" } };
+            return Results.Ok(new { users });
+        }
+    } catch {
+        return Results.Ok(new { users = Array.Empty<object>() });
+    }
+});
+
+app.MapPost("/api/users", async (HttpContext context) =>
+{
+    var request = await context.Request.ReadFromJsonAsync<CreateUserRequest>();
+    if (request == null || string.IsNullOrWhiteSpace(request.Username) || string.IsNullOrWhiteSpace(request.Password))
+        return Results.BadRequest(new { error = "Invalid user parameters" });
+
+    try {
+        if (OperatingSystem.IsLinux()) {
+            // 1. Create system user (no nologin shell, no home directory)
+            RunCommand("sudo", "useradd", "-M", "-s", "/sbin/nologin", request.Username);
+            // 2. Set Samba password
+            var smbCmd = $"echo -e \"{request.Password}\\n{request.Password}\" | sudo smbpasswd -a -s {request.Username}";
+            RunCommand("bash", "-c", smbCmd);
+        } else {
+            var path = GetUsersFilePath();
+            File.AppendAllText(path, $"{request.Username}\n");
+        }
+        return Results.Ok(new { success = true });
+    } catch (Exception ex) {
+        return Results.Problem(ex.Message);
+    }
+});
+
+app.MapDelete("/api/users/{username}", (string username) =>
+{
+    if (string.IsNullOrWhiteSpace(username)) return Results.BadRequest();
+
+    try {
+        if (OperatingSystem.IsLinux()) {
+            RunCommand("sudo", "smbpasswd", "-x", username);
+            RunCommand("sudo", "userdel", username);
+        } else {
+            var path = GetUsersFilePath();
+            if (File.Exists(path)) {
+                var lines = File.ReadAllLines(path).Where(l => l.Trim() != username).ToList();
+                File.WriteAllLines(path, lines);
+            }
+        }
+        return Results.Ok(new { success = true });
+    } catch (Exception ex) {
+        return Results.Problem(ex.Message);
+    }
+});
+
+// ZFS Pool Import APIs
+app.MapGet("/api/zfs/importable", () =>
+{
+    try {
+        if (OperatingSystem.IsLinux()) {
+            var output = RunCommand("zpool", "import");
+            if (string.IsNullOrWhiteSpace(output) || output.Contains("no pools available"))
+                return Results.Ok(new { pools = Array.Empty<object>() });
+
+            var pools = output.Split('\n', StringSplitOptions.RemoveEmptyEntries)
+                .Select(line => line.Trim())
+                .Where(line => line.StartsWith("pool:"))
+                .Select(line => line.Substring(5).Trim())
+                .Select(name => new { name })
+                .ToList();
+            return Results.Ok(new { pools });
+        } else {
+            // Mock importable pools for dev mode
+            var pools = new[] { new { name = "tank_backup" } };
+            return Results.Ok(new { pools });
+        }
+    } catch {
+        return Results.Ok(new { pools = Array.Empty<object>() });
+    }
+});
+
+app.MapPost("/api/zfs/pools/import", async (HttpContext context) =>
+{
+    var request = await context.Request.ReadFromJsonAsync<ImportPoolRequest>();
+    if (request == null || string.IsNullOrWhiteSpace(request.Name))
+        return Results.BadRequest();
+
+    try {
+        if (OperatingSystem.IsLinux()) {
+            RunCommand("zpool", "import", request.Name);
+        }
+        return Results.Ok(new { success = true });
+    } catch (Exception ex) {
+        return Results.Problem(ex.Message);
+    }
+});
+
 Console.WriteLine("SimpleNAS running on http://0.0.0.0:8000");
 Console.WriteLine("Default login: admin / SimpleNAS2026");
 app.Run();
+
+string GetUsersFilePath()
+{
+    return Path.Combine(Directory.GetCurrentDirectory(), "users.txt");
+}
 
 // File Path Helpers
 string GetSmbConfPath()
@@ -682,3 +798,5 @@ record NfsExport(string Path, List<string> Clients);
 record ServiceControlRequest(string Service, string Action);
 record FirewallToggleRequest(bool Enable);
 record WhitelistRequest(string Ip, int Port, string Comment);
+record CreateUserRequest(string Username, string Password);
+record ImportPoolRequest(string Name);

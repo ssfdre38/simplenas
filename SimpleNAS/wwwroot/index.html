@@ -63,6 +63,7 @@
                 <button onclick="showTab('zfs')" class="nav-btn px-4 py-2 text-sm font-semibold rounded-lg text-slate-400 hover:text-white transition-all duration-200 border border-transparent" data-tab="zfs">ZFS Storage</button>
                 <button onclick="showTab('shares')" class="nav-btn px-4 py-2 text-sm font-semibold rounded-lg text-slate-400 hover:text-white transition-all duration-200 border border-transparent" data-tab="shares">File Shares</button>
                 <button onclick="showTab('network')" class="nav-btn px-4 py-2 text-sm font-semibold rounded-lg text-slate-400 hover:text-white transition-all duration-200 border border-transparent" data-tab="network">Network</button>
+                <button onclick="showTab('users')" class="nav-btn px-4 py-2 text-sm font-semibold rounded-lg text-slate-400 hover:text-white transition-all duration-200 border border-transparent" data-tab="users">Users</button>
             </div>
         </div>
     </nav>
@@ -151,9 +152,14 @@
                     <h2 class="text-3xl font-bold tracking-tight text-white">ZFS Storage Center</h2>
                     <p class="text-slate-400 text-sm">Manage ZFS RAID pools, datasets, and logical disks</p>
                 </div>
-                <button onclick="showCreatePool()" class="bg-cyan-500 hover:bg-cyan-600 text-slate-950 font-bold px-5 py-2.5 rounded-xl shadow-lg shadow-cyan-500/10 transition-all duration-200">
-                    Create New Pool
-                </button>
+                <div class="flex space-x-3">
+                    <button onclick="showImportPool()" class="bg-slate-800 hover:bg-slate-700 text-cyan-400 border border-cyan-500/20 font-bold px-5 py-2.5 rounded-xl transition-all">
+                        Import Existing Pool
+                    </button>
+                    <button onclick="showCreatePool()" class="bg-cyan-500 hover:bg-cyan-600 text-slate-950 font-bold px-5 py-2.5 rounded-xl shadow-lg shadow-cyan-500/10 transition-all duration-200">
+                        Create New Pool
+                    </button>
+                </div>
             </div>
             
             <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -191,6 +197,7 @@
             </div>
 
             <!-- Create Pool Modal -->
+            <!-- Create ZFS Pool Modal -->
             <div id="create-pool-modal" class="hidden fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center z-50">
                 <div class="glass-card rounded-2xl p-6 w-full max-w-md shadow-2xl">
                     <h3 class="text-xl font-bold text-white mb-4">Create ZFS Pool</h3>
@@ -217,6 +224,19 @@
                             <button type="button" onclick="hideCreatePool()" class="bg-slate-800 hover:bg-slate-750 text-slate-300 px-5 py-2.5 rounded-xl transition-all">Cancel</button>
                         </div>
                     </form>
+                </div>
+            </div>
+
+            <!-- ZFS Import Pool Modal -->
+            <div id="import-pool-modal" class="hidden fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center z-50">
+                <div class="glass-card rounded-2xl p-6 w-full max-w-md shadow-2xl">
+                    <h3 class="text-xl font-bold text-white mb-4">Import ZFS Pool</h3>
+                    <div id="importable-pools-list" class="space-y-3 mb-5">
+                        <p class="text-slate-500 text-xs">Scanning for exportable pools...</p>
+                    </div>
+                    <div class="flex justify-end">
+                        <button type="button" onclick="hideImportPool()" class="bg-slate-800 hover:bg-slate-750 text-slate-300 px-5 py-2.5 rounded-xl transition-all">Close</button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -427,6 +447,52 @@
                         <span>Ethernet Adapters</span>
                     </h3>
                     <div id="interfaces-list" class="space-y-3"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- USERS TAB -->
+        <div id="tab-users" class="tab-content hidden space-y-6">
+            <div class="flex justify-between items-center">
+                <div>
+                    <h2 class="text-3xl font-bold tracking-tight text-white">User Account Manager</h2>
+                    <p class="text-slate-400 text-sm">Add and manage secure Samba and system accounts for network access</p>
+                </div>
+                <button onclick="showCreateUser()" class="bg-cyan-500 hover:bg-cyan-600 text-slate-950 font-bold px-5 py-2.5 rounded-xl shadow-lg shadow-cyan-500/10 transition-all duration-200">
+                    Add New NAS User
+                </button>
+            </div>
+            
+            <div class="glass-card rounded-2xl p-6 shadow-xl max-w-4xl">
+                <h3 class="text-xl font-bold text-white mb-4 flex items-center space-x-2">
+                    <svg class="w-5 h-5 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"></path>
+                    </svg>
+                    <span>Samba & System Users</span>
+                </h3>
+                <div id="users-list" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <p class="text-slate-500 text-sm">Scanning for NAS user accounts...</p>
+                </div>
+            </div>
+
+            <!-- Create User Modal -->
+            <div id="create-user-modal" class="hidden fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center z-50">
+                <div class="glass-card rounded-2xl p-6 w-full max-w-md shadow-2xl">
+                    <h3 class="text-xl font-bold text-white mb-4">Add New NAS User</h3>
+                    <form onsubmit="createUser(event)">
+                        <div class="mb-4">
+                            <label class="block mb-2 text-sm font-semibold text-slate-300">Username</label>
+                            <input type="text" id="user-username" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:border-cyan-500 focus:outline-none" placeholder="e.g., media_user" required>
+                        </div>
+                        <div class="mb-5">
+                            <label class="block mb-2 text-sm font-semibold text-slate-300">Password</label>
+                            <input type="password" id="user-password" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:border-cyan-500 focus:outline-none" placeholder="••••••••" required>
+                        </div>
+                        <div class="flex gap-2">
+                            <button type="submit" class="bg-cyan-500 hover:bg-cyan-600 text-slate-950 font-bold px-5 py-2.5 rounded-xl transition-all">Add User</button>
+                            <button type="button" onclick="hideCreateUser()" class="bg-slate-800 hover:bg-slate-750 text-slate-300 px-5 py-2.5 rounded-xl transition-all">Cancel</button>
+                        </div>
+                    </form>
                 </div>
             </div>
         </div>

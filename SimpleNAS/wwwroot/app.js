@@ -26,6 +26,9 @@ function showTab(tabName) {
             loadNetwork();
             loadFirewallStatus();
             break;
+        case 'users':
+            loadUsers();
+            break;
     }
 }
 
@@ -315,6 +318,61 @@ async function createPool(event) {
         }
     } catch (error) {
         alert(`Error: ${error.message}`);
+    }
+}
+
+// ZFS Import actions
+async function showImportPool() {
+    try {
+        const response = await fetch(`${API_BASE}/zfs/importable`);
+        const data = await response.json();
+        
+        const listDiv = document.getElementById('importable-pools-list');
+        listDiv.innerHTML = '';
+        
+        if (data.pools.length === 0) {
+            listDiv.innerHTML = '<p class="text-slate-500 text-xs py-2">No exportable ZFS pools found</p>';
+        } else {
+            data.pools.forEach(pool => {
+                listDiv.innerHTML += `
+                    <div class="flex justify-between items-center p-3 bg-slate-900/40 border border-slate-800 rounded-xl">
+                        <span class="font-bold text-white font-mono text-sm">${pool.name}</span>
+                        <button onclick="importPool('${pool.name}')" class="bg-cyan-500 hover:bg-cyan-600 text-slate-950 text-xs font-bold px-3 py-1.5 rounded-lg transition-all">
+                            Import
+                        </button>
+                    </div>
+                `;
+            });
+        }
+    } catch (e) {
+        console.error('Error fetching importable pools:', e);
+    }
+    document.getElementById('import-pool-modal').classList.remove('hidden');
+}
+
+function hideImportPool() {
+    document.getElementById('import-pool-modal').classList.add('hidden');
+}
+
+async function importPool(name) {
+    try {
+        const response = await fetch(`${API_BASE}/zfs/pools/import`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({name})
+        });
+        
+        if (response.ok) {
+            alert(`ZFS Pool "${name}" successfully imported!`);
+            hideImportPool();
+            loadZFSPools();
+            loadZfsDatasets();
+            loadZfsDevices();
+        } else {
+            alert('Failed to import pool');
+        }
+    } catch (e) {
+        alert(`Error: ${e.message}`);
     }
 }
 
@@ -657,6 +715,99 @@ async function addCustomWhitelist(event) {
             loadFirewallStatus();
         } else {
             alert('Failed to whitelist custom IP rule');
+        }
+    } catch (e) {
+        alert(`Error: ${e.message}`);
+    }
+}
+
+// User Management Actions
+async function loadUsers() {
+    try {
+        const response = await fetch(`${API_BASE}/users`);
+        const data = await response.json();
+        
+        const listDiv = document.getElementById('users-list');
+        listDiv.innerHTML = '';
+        
+        if (data.users.length === 0) {
+            listDiv.innerHTML = '<p class="text-slate-500 text-sm py-2 col-span-2">No active NAS user accounts configured</p>';
+            return;
+        }
+        
+        data.users.forEach(user => {
+            listDiv.innerHTML += `
+                <div class="glass-card bg-slate-900/40 p-4 rounded-xl border border-slate-850 flex justify-between items-center">
+                    <div class="flex items-center space-x-3">
+                        <div class="p-2 bg-slate-950/40 rounded-lg text-cyan-400">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path>
+                            </svg>
+                        </div>
+                        <div>
+                            <span class="block font-bold text-white text-base">${user.username}</span>
+                            <span class="block text-slate-455 text-[10px]">Samba / Linux User</span>
+                        </div>
+                    </div>
+                    <button onclick="deleteUser('${user.username}')" class="text-rose-500 hover:text-rose-400 font-bold text-xs bg-rose-500/10 hover:bg-rose-500/20 px-3 py-1.5 rounded-lg border border-rose-500/20 transition-all">
+                        Remove
+                    </button>
+                </div>
+            `;
+        });
+    } catch (e) {
+        console.error('Error loading users:', e);
+    }
+}
+
+function showCreateUser() {
+    document.getElementById('create-user-modal').classList.remove('hidden');
+}
+
+function hideCreateUser() {
+    document.getElementById('create-user-modal').classList.add('hidden');
+    document.getElementById('user-username').value = '';
+    document.getElementById('user-password').value = '';
+}
+
+async function createUser(event) {
+    event.preventDefault();
+    const username = document.getElementById('user-username').value;
+    const password = document.getElementById('user-password').value;
+    
+    try {
+        const response = await fetch(`${API_BASE}/users`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({username, password})
+        });
+        
+        if (response.ok) {
+            alert(`User "${username}" created successfully!`);
+            hideCreateUser();
+            loadUsers();
+        } else {
+            const err = await response.json();
+            alert(`Failed to create user: ${err.error || 'Unknown error'}`);
+        }
+    } catch (e) {
+        alert(`Error: ${e.message}`);
+    }
+}
+
+async function deleteUser(username) {
+    if (!confirm(`Are you sure you want to completely delete the NAS user "${username}"?`)) return;
+    
+    try {
+        const response = await fetch(`${API_BASE}/users/${username}`, {
+            method: 'DELETE'
+        });
+        
+        if (response.ok) {
+            alert(`User "${username}" successfully deleted!`);
+            loadUsers();
+        } else {
+            alert('Failed to delete user');
         }
     } catch (e) {
         alert(`Error: ${e.message}`);
