@@ -578,6 +578,11 @@ async function loadFirewallStatus() {
             statusDiv.innerHTML = '<span class="text-rose-400 bg-rose-500/10 border-rose-500/20 border text-xs px-2.5 py-0.5 rounded-lg">Firewall Inactive (Vulnerable)</span>';
             toggleSwitch.checked = false;
         }
+
+        // Fetch client IP address
+        const ipResp = await fetch(`${API_BASE}/network/myip`);
+        const ipData = await ipResp.json();
+        document.getElementById('detected-ip').textContent = ipData.ip;
     } catch (error) {
         console.error('Firewall status load error:', error);
     }
@@ -602,6 +607,59 @@ async function toggleFirewall(element) {
     } catch (e) {
         alert(`Error: ${e.message}`);
         loadFirewallStatus();
+    }
+}
+
+async function whitelistCurrentIP() {
+    const ip = document.getElementById('detected-ip').textContent;
+    if (!ip || ip === 'Detecting...' || ip === 'unknown') {
+        alert('Could not detect a valid connection IP');
+        return;
+    }
+
+    if (!confirm(`Are you sure you want to whitelist your current IP address ${ip} for ALL services and ports?`)) return;
+
+    try {
+        const response = await fetch(`${API_BASE}/network/firewall/whitelist`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ip: ip, port: 0, comment: 'Home Network Whitelist'})
+        });
+        
+        if (response.ok) {
+            alert(`IP address ${ip} successfully whitelisted in UFW!`);
+            loadFirewallStatus();
+        } else {
+            alert('Failed to whitelist IP address');
+        }
+    } catch (e) {
+        alert(`Error: ${e.message}`);
+    }
+}
+
+async function addCustomWhitelist(event) {
+    event.preventDefault();
+    const ip = document.getElementById('whitelist-ip').value;
+    const port = parseInt(document.getElementById('whitelist-port').value);
+    const comment = document.getElementById('whitelist-comment').value;
+
+    try {
+        const response = await fetch(`${API_BASE}/network/firewall/whitelist`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ip, port, comment})
+        });
+        
+        if (response.ok) {
+            alert(`IP ${ip} whitelisted successfully!`);
+            document.getElementById('whitelist-ip').value = '';
+            document.getElementById('whitelist-comment').value = '';
+            loadFirewallStatus();
+        } else {
+            alert('Failed to whitelist custom IP rule');
+        }
+    } catch (e) {
+        alert(`Error: ${e.message}`);
     }
 }
 

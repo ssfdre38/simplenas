@@ -477,6 +477,43 @@ app.MapPost("/api/network/firewall/toggle", async (HttpContext context) =>
     }
 });
 
+// Get user's current connection IP
+app.MapGet("/api/network/myip", (HttpContext context) =>
+{
+    var ip = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+    // Check for IPv6 loopback
+    if (ip == "::1" || ip == "127.0.0.1") ip = "127.0.0.1";
+    // Strip IPv6 to IPv4 mapping prefix if present (e.g. ::ffff:192.168.1.1)
+    if (ip.StartsWith("::ffff:")) ip = ip.Substring(7);
+    return Results.Ok(new { ip });
+});
+
+// Add Firewall whitelist rule
+app.MapPost("/api/network/firewall/whitelist", async (HttpContext context) =>
+{
+    var request = await context.Request.ReadFromJsonAsync<WhitelistRequest>();
+    if (request == null || string.IsNullOrWhiteSpace(request.Ip))
+        return Results.BadRequest(new { error = "Invalid IP address" });
+
+    try {
+        if (OperatingSystem.IsLinux()) {
+            var port = request.Port;
+            var comment = !string.IsNullOrWhiteSpace(request.Comment) ? $"comment '{request.Comment}'" : "";
+            
+            if (port > 0) {
+                // Allow specific port
+                RunCommand("ufw", "allow", "from", request.Ip, "to", "any", "port", port.ToString(), "proto", "tcp", comment);
+            } else {
+                // Allow all ports
+                RunCommand("ufw", "allow", "from", request.Ip, comment);
+            }
+        }
+        return Results.Ok(new { success = true });
+    } catch (Exception ex) {
+        return Results.Problem(ex.Message);
+    }
+});
+
 Console.WriteLine("SimpleNAS running on http://0.0.0.0:8000");
 Console.WriteLine("Default login: admin / SimpleNAS2026");
 app.Run();
@@ -644,3 +681,4 @@ record SmbShare(string Name, Dictionary<string, string> Config);
 record NfsExport(string Path, List<string> Clients);
 record ServiceControlRequest(string Service, string Action);
 record FirewallToggleRequest(bool Enable);
+record WhitelistRequest(string Ip, int Port, string Comment);
