@@ -18,6 +18,7 @@
                 <button onclick="showTab('dashboard')" class="nav-btn px-4 py-2 rounded" data-tab="dashboard">Dashboard</button>
                 <button onclick="showTab('zfs')" class="nav-btn px-4 py-2 rounded" data-tab="zfs">ZFS</button>
                 <button onclick="showTab('shares')" class="nav-btn px-4 py-2 rounded" data-tab="shares">Shares</button>
+                <button onclick="showTab('cloud')" class="nav-btn px-4 py-2 rounded" data-tab="cloud">Cloud Storage</button>
                 <button onclick="showTab('network')" class="nav-btn px-4 py-2 rounded" data-tab="network">Network</button>
             </div>
         </div>
@@ -109,6 +110,42 @@
                     </button>
                     <div id="nfs-list" class="space-y-2"></div>
                 </div>
+            </div>
+        </div>
+
+        <!-- Cloud Storage Tab -->
+        <div id="tab-cloud" class="tab-content hidden">
+            <h2 class="text-3xl font-bold mb-6">Cloud Storage & Hybrid Pools</h2>
+            
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <!-- Rclone Google Drive Mount -->
+                <div class="card">
+                    <h3 class="text-xl font-semibold mb-4">Rclone Google Drive Mount</h3>
+                    <div id="rclone-status" class="mb-4 text-gray-700">Checking...</div>
+                    <div class="space-x-2">
+                        <button onclick="mountCloud()" class="bg-blue-600 text-white px-4 py-2 rounded">Mount GDrive</button>
+                        <button onclick="unmountCloud()" class="bg-red-600 text-white px-4 py-2 rounded">Unmount</button>
+                    </div>
+                </div>
+
+                <!-- MergerFS Union Pool -->
+                <div class="card">
+                    <h3 class="text-xl font-semibold mb-4">MergerFS Union Pool</h3>
+                    <div id="mergerfs-status" class="mb-4 text-gray-700">Checking...</div>
+                    <div class="space-x-2">
+                        <button onclick="mountUnion()" class="bg-green-600 text-white px-4 py-2 rounded">Mount Union</button>
+                        <button onclick="unmountUnion()" class="bg-red-600 text-white px-4 py-2 rounded">Unmount</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Sync Task Status -->
+            <div class="card mt-6">
+                <h3 class="text-xl font-semibold mb-4">Google Drive Backup Sync Task</h3>
+                <div class="mb-4 text-gray-700">
+                    <p id="sync-status">Inactive</p>
+                </div>
+                <button onclick="runSync()" class="bg-purple-600 text-white px-4 py-2 rounded">Run Manual Sync</button>
             </div>
         </div>
 

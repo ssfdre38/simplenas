@@ -192,11 +192,148 @@ app.MapGet("/api/system/status", () =>
         var fields = lines[1].Split((char[])null, StringSplitOptions.RemoveEmptyEntries);
         if (fields.Length >= 5) diskPercent = fields[4];
     }
+
+    double memPercent = 0.0;
+    try {
+        if (File.Exists("/proc/meminfo")) {
+            var memLines = File.ReadAllLines("/proc/meminfo");
+            double total = 0, available = 0;
+            foreach (var line in memLines) {
+                if (line.StartsWith("MemTotal:")) {
+                    total = double.Parse(System.Text.RegularExpressions.Regex.Replace(line, "[^0-9]", ""));
+                } else if (line.StartsWith("MemAvailable:")) {
+                    available = double.Parse(System.Text.RegularExpressions.Regex.Replace(line, "[^0-9]", ""));
+                }
+            }
+            if (total > 0) {
+                memPercent = ((total - available) / total) * 100.0;
+            }
+        }
+    } catch {}
+
+    double cpuPercent = 0.0;
+    try {
+        if (File.Exists("/proc/stat")) {
+            var getUsage = () => {
+                var statLine = File.ReadLines("/proc/stat").First();
+                var parts = statLine.Split(' ', StringSplitOptions.RemoveEmptyEntries).Skip(1).Select(double.Parse).ToArray();
+                var idle = parts[3] + parts[4]; // idle + iowait
+                var total = parts.Sum();
+                return (idle, total);
+            };
+            var (idle1, total1) = getUsage();
+            Thread.Sleep(100);
+            var (idle2, total2) = getUsage();
+            var totalDelta = total2 - total1;
+            var idleDelta = idle2 - idle1;
+            if (totalDelta > 0) {
+                cpuPercent = (1.0 - (idleDelta / totalDelta)) * 100.0;
+            }
+        }
+    } catch {}
+
     return Results.Json(new {
-        cpu = new { percent = 0.0 },
-        memory = new { percent = 0.0 },
+        cpu = new { percent = cpuPercent },
+        memory = new { percent = memPercent },
         disk = new { percent = diskPercent }
     });
+});
+
+app.MapGet("/api/system/services", () =>
+{
+    var getStatus = (string serviceName) => {
+        var output = RunCommand("systemctl", "is-active", serviceName).Trim();
+        return output == "active" ? "active" : "inactive";
+    };
+    return Results.Json(new {
+        services = new Dictionary<string, string> {
+            { "ZFS Mount Service", getStatus("zfs-mount") },
+            { "Samba Share (SMB)", getStatus("smbd") },
+            { "NFS Share Server", getStatus("nfs-kernel-server") },
+            { "Tailscale VPN", getStatus("tailscaled") }
+        }
+    });
+});
+
+// Cloud Storage Manager
+bool isSyncActive = false;
+
+app.MapGet("/api/cloud/status", () =>
+{
+    var mountOutput = RunCommand("mount");
+    bool rcloneMounted = mountOutput.Contains("/mnt/gdrive");
+    bool mergerfsMounted = mountOutput.Contains("/mnt/tank/unified");
+    
+    return Results.Json(new {
+        rcloneMounted = rcloneMounted,
+        rclonePath = "/mnt/gdrive",
+        mergerfsMounted = mergerfsMounted,
+        mergerfsPath = "/mnt/tank/unified",
+        syncActive = isSyncActive
+    });
+});
+
+app.MapPost("/api/cloud/mount", () =>
+{
+    try {
+        if (!Directory.Exists("/mnt/gdrive")) Directory.CreateDirectory("/mnt/gdrive");
+        
+        Task.Run(() => {
+            RunCommand("rclone", "mount", "gdrive:", "/mnt/gdrive", "--vfs-cache-mode", "writes", "--allow-other", "--daemon");
+        });
+        return Results.Ok(new { success = true });
+    } catch (Exception ex) {
+        return Results.Json(new { error = ex.Message }, statusCode: 500);
+    }
+});
+
+app.MapPost("/api/cloud/unmount", () =>
+{
+    try {
+        RunCommand("fusermount", "-u", "/mnt/gdrive");
+        return Results.Ok(new { success = true });
+    } catch (Exception ex) {
+        return Results.Json(new { error = ex.Message }, statusCode: 500);
+    }
+});
+
+app.MapPost("/api/cloud/union", () =>
+{
+    try {
+        if (!Directory.Exists("/mnt/tank/unified")) Directory.CreateDirectory("/mnt/tank/unified");
+        
+        Task.Run(() => {
+            RunCommand("mergerfs", "-o", "defaults,allow_other,use_ino,category.create=ff", "/mnt/tank/local:/mnt/gdrive", "/mnt/tank/unified");
+        });
+        return Results.Ok(new { success = true });
+    } catch (Exception ex) {
+        return Results.Json(new { error = ex.Message }, statusCode: 500);
+    }
+});
+
+app.MapPost("/api/cloud/unmount-union", () =>
+{
+    try {
+        RunCommand("fusermount", "-u", "/mnt/tank/unified");
+        return Results.Ok(new { success = true });
+    } catch (Exception ex) {
+        return Results.Json(new { error = ex.Message }, statusCode: 500);
+    }
+});
+
+app.MapPost("/api/cloud/sync", () =>
+{
+    if (isSyncActive) return Results.Conflict(new { error = "Sync task is already running." });
+    
+    isSyncActive = true;
+    Task.Run(() => {
+        try {
+            RunCommand("rclone", "move", "/mnt/tank/local/Backups", "gdrive:Backups", "--min-age", "30d");
+        } finally {
+            isSyncActive = false;
+        }
+    });
+    return Results.Ok(new { success = true });
 });
 
 Console.WriteLine("SimpleNAS running on http://0.0.0.0:8000");

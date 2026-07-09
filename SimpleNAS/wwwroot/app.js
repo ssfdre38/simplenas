@@ -20,6 +20,9 @@ function showTab(tabName) {
         case 'shares':
             loadShares();
             break;
+        case 'cloud':
+            loadCloud();
+            break;
         case 'network':
             loadNetwork();
             break;
@@ -268,3 +271,110 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }, 5000);
 });
+
+// Cloud Storage Manager
+async function loadCloud() {
+    try {
+        const response = await fetch(`${API_BASE}/cloud/status`);
+        const data = await response.json();
+        
+        const rcloneDiv = document.getElementById('rclone-status');
+        if (data.rcloneMounted) {
+            rcloneDiv.innerHTML = `<p class="text-green-600 font-bold">Mounted (Active)</p>
+                                   <p class="text-sm text-gray-500">Mountpoint: ${data.rclonePath}</p>`;
+        } else {
+            rcloneDiv.innerHTML = '<p class="text-red-600 font-semibold">Not Mounted</p>';
+        }
+        
+        const mergerfsDiv = document.getElementById('mergerfs-status');
+        if (data.mergerfsMounted) {
+            mergerfsDiv.innerHTML = `<p class="text-green-600 font-bold">Union Mounted (Active)</p>
+                                     <p class="text-sm text-gray-500">Mountpoint: ${data.mergerfsPath}</p>`;
+        } else {
+            mergerfsDiv.innerHTML = '<p class="text-red-600 font-semibold">Not Mounted</p>';
+        }
+
+        const syncDiv = document.getElementById('sync-status');
+        if (data.syncActive) {
+            syncDiv.innerHTML = `<span class="text-purple-600 font-bold animate-pulse">Running Background Sync...</span>`;
+        } else {
+            syncDiv.innerHTML = `<span class="text-gray-500">Idle (Last run completed successfully)</span>`;
+        }
+    } catch (error) {
+        console.error('Cloud load error:', error);
+    }
+}
+
+async function mountCloud() {
+    try {
+        const response = await fetch(`${API_BASE}/cloud/mount`, { method: 'POST' });
+        const res = await response.json();
+        if (response.ok) {
+            alert('Cloud mount triggered successfully.');
+        } else {
+            alert(`Error: ${res.error || 'Failed to mount cloud storage'}`);
+        }
+        loadCloud();
+    } catch (error) {
+        alert(`Error: ${error.message}`);
+    }
+}
+
+async function unmountCloud() {
+    try {
+        const response = await fetch(`${API_BASE}/cloud/unmount`, { method: 'POST' });
+        const res = await response.json();
+        if (response.ok) {
+            alert('Cloud unmount triggered successfully.');
+        } else {
+            alert(`Error: ${res.error || 'Failed to unmount cloud storage'}`);
+        }
+        loadCloud();
+    } catch (error) {
+        alert(`Error: ${error.message}`);
+    }
+}
+
+async function mountUnion() {
+    try {
+        const response = await fetch(`${API_BASE}/cloud/union`, { method: 'POST' });
+        const res = await response.json();
+        if (response.ok) {
+            alert('Union pool mounted successfully.');
+        } else {
+            alert(`Error: ${res.error || 'Failed to mount union pool'}`);
+        }
+        loadCloud();
+    } catch (error) {
+        alert(`Error: ${error.message}`);
+    }
+}
+
+async function unmountUnion() {
+    try {
+        const response = await fetch(`${API_BASE}/cloud/unmount-union`, { method: 'POST' });
+        const res = await response.json();
+        if (response.ok) {
+            alert('Union pool unmounted successfully.');
+        } else {
+            alert(`Error: ${res.error || 'Failed to unmount union pool'}`);
+        }
+        loadCloud();
+    } catch (error) {
+        alert(`Error: ${error.message}`);
+    }
+}
+
+async function runSync() {
+    try {
+        const response = await fetch(`${API_BASE}/cloud/sync`, { method: 'POST' });
+        if (response.ok) {
+            alert('Background backup sync task started!');
+        } else {
+            alert('Failed to trigger background sync task.');
+        }
+        loadCloud();
+    } catch (error) {
+        alert(`Error: ${error.message}`);
+    }
+}
