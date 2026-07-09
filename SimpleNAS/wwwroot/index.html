@@ -111,6 +111,44 @@
                     <div id="nfs-list" class="space-y-2"></div>
                 </div>
             </div>
+
+            <!-- Create SMB Share Modal -->
+            <div id="create-smb-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
+                <div class="bg-white rounded-lg p-6 w-full max-w-md">
+                    <h3 class="text-xl font-bold mb-4">Create SMB Share</h3>
+                    <form onsubmit="createSMB(event)">
+                        <div class="mb-4">
+                            <label class="block mb-2 font-medium">Share Name</label>
+                            <input type="text" id="smb-name" class="w-full border rounded px-3 py-2" required placeholder="e.g. Storage">
+                        </div>
+                        <div class="mb-4">
+                            <label class="block mb-2 font-medium">Path</label>
+                            <input type="text" id="smb-path" class="w-full border rounded px-3 py-2" required placeholder="e.g. /mnt/tank/local/Storage">
+                        </div>
+                        <div class="flex gap-2">
+                            <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded font-semibold">Create Share</button>
+                            <button type="button" onclick="hideCreateSMB()" class="bg-gray-300 px-4 py-2 rounded font-semibold">Cancel</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+
+            <!-- Create NFS Export Modal -->
+            <div id="create-nfs-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
+                <div class="bg-white rounded-lg p-6 w-full max-w-md">
+                    <h3 class="text-xl font-bold mb-4">Create NFS Export</h3>
+                    <form onsubmit="createNFS(event)">
+                        <div class="mb-4">
+                            <label class="block mb-2 font-medium">Path</label>
+                            <input type="text" id="nfs-path" class="w-full border rounded px-3 py-2" required placeholder="e.g. /mnt/tank/local/exports">
+                        </div>
+                        <div class="flex gap-2">
+                            <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded font-semibold">Create Export</button>
+                            <button type="button" onclick="hideCreateNFS()" class="bg-gray-300 px-4 py-2 rounded font-semibold">Cancel</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
         </div>
 
         <!-- Cloud Storage Tab -->

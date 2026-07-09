@@ -146,6 +146,31 @@ app.MapGet("/api/disks", () =>
     return Results.Json(JsonDocument.Parse(output).RootElement);
 });
 
+app.MapGet("/api/zfs/devices", () =>
+{
+    try {
+        var output = RunCommand("lsblk", "-J", "-o", "NAME,SIZE,TYPE,MOUNTPOINT,MODEL");
+        using var doc = JsonDocument.Parse(output);
+        var blockdevices = doc.RootElement.GetProperty("blockdevices");
+        
+        var list = new List<object>();
+        foreach (var dev in blockdevices.EnumerateArray()) {
+            string type = dev.GetProperty("type").GetString() ?? "";
+            string mountpoint = dev.GetProperty("mountpoint").GetString() ?? "";
+            string name = dev.GetProperty("name").GetString() ?? "";
+            string size = dev.GetProperty("size").GetString() ?? "";
+            
+            // Available ZFS devices: type disk (raw disk) and not mounted
+            if (type == "disk" && string.IsNullOrWhiteSpace(mountpoint)) {
+                list.Add(new { name = $"/dev/{name}", size = size });
+            }
+        }
+        return Results.Json(new { devices = list });
+    } catch {
+        return Results.Json(new { devices = Array.Empty<object>() });
+    }
+});
+
 app.MapGet("/api/zfs/pools", () =>
 {
     try {
@@ -181,6 +206,109 @@ app.MapPost("/api/zfs/pools", async (HttpContext context) =>
     args.AddRange(request.Devices);
     RunCommand("zpool", args.ToArray());
     return Results.Ok(new { status = "created" });
+});
+
+// Shares Manager - SMB Shares
+app.MapGet("/api/shares/smb", () =>
+{
+    try {
+        if (!File.Exists("/etc/samba/smb.conf"))
+            return Results.Json(new { shares = Array.Empty<object>() });
+        
+        var lines = File.ReadAllLines("/etc/samba/smb.conf");
+        var list = new List<object>();
+        string currentShare = null;
+        string currentPath = null;
+        
+        foreach (var line in lines) {
+            var trimmed = line.Trim();
+            if (trimmed.StartsWith("[") && trimmed.EndsWith("]")) {
+                if (currentShare != null && currentShare != "global" && currentShare != "homes" && currentShare != "printers" && currentShare != "print$") {
+                    list.Add(new { name = currentShare, config = new { path = currentPath } });
+                }
+                currentShare = trimmed.Substring(1, trimmed.Length - 2);
+                currentPath = null;
+            } else if (currentShare != null && trimmed.StartsWith("path")) {
+                var parts = trimmed.Split('=', 2);
+                if (parts.Length == 2) currentPath = parts[1].Trim();
+            }
+        }
+        if (currentShare != null && currentShare != "global" && currentShare != "homes" && currentShare != "printers" && currentShare != "print$") {
+            list.Add(new { name = currentShare, config = new { path = currentPath } });
+        }
+        return Results.Json(new { shares = list });
+    } catch {
+        return Results.Json(new { shares = Array.Empty<object>() });
+    }
+});
+
+app.MapPost("/api/shares/smb", async (HttpContext context) =>
+{
+    try {
+        var request = await context.Request.ReadFromJsonAsync<SmbShareRequest>();
+        if (request == null || string.IsNullOrWhiteSpace(request.Name) || string.IsNullOrWhiteSpace(request.Path))
+            return Results.BadRequest(new { error = "Name and Path are required." });
+        
+        if (!Directory.Exists(request.Path)) {
+            Directory.CreateDirectory(request.Path);
+        }
+        
+        var newShareBlock = $"\n[{request.Name}]\n   path = {request.Path}\n   browseable = yes\n   read only = no\n   guest ok = yes\n   create mask = 0775\n   directory mask = 0775\n";
+        await File.AppendAllTextAsync("/etc/samba/smb.conf", newShareBlock);
+        
+        RunCommand("systemctl", "restart", "smbd");
+        return Results.Ok(new { success = true });
+    } catch (Exception ex) {
+        return Results.Json(new { error = ex.Message }, statusCode: 500);
+    }
+});
+
+// Shares Manager - NFS exports
+app.MapGet("/api/shares/nfs", () =>
+{
+    try {
+        if (!File.Exists("/etc/exports"))
+            return Results.Json(new { exports = Array.Empty<object>() });
+        
+        var lines = File.ReadAllLines("/etc/exports");
+        var list = new List<object>();
+        foreach (var line in lines) {
+            var trimmed = line.Trim();
+            if (string.IsNullOrWhiteSpace(trimmed) || trimmed.StartsWith("#")) continue;
+            
+            var parts = trimmed.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length >= 1) {
+                var path = parts[0];
+                var clients = parts.Skip(1).ToList();
+                list.Add(new { path = path, clients = clients.Count > 0 ? clients : new List<string> { "*" } });
+            }
+        }
+        return Results.Json(new { exports = list });
+    } catch {
+        return Results.Json(new { exports = Array.Empty<object>() });
+    }
+});
+
+app.MapPost("/api/shares/nfs", async (HttpContext context) =>
+{
+    try {
+        var request = await context.Request.ReadFromJsonAsync<NfsExportRequest>();
+        if (request == null || string.IsNullOrWhiteSpace(request.Path))
+            return Results.BadRequest(new { error = "Path is required." });
+        
+        if (!Directory.Exists(request.Path)) {
+            Directory.CreateDirectory(request.Path);
+        }
+        
+        var newExportLine = $"\n{request.Path} *(rw,sync,no_subtree_check,no_root_squash)\n";
+        await File.AppendAllTextAsync("/etc/exports", newExportLine);
+        
+        RunCommand("exportfs", "-ra");
+        RunCommand("systemctl", "restart", "nfs-kernel-server");
+        return Results.Ok(new { success = true });
+    } catch (Exception ex) {
+        return Results.Json(new { error = ex.Message }, statusCode: 500);
+    }
 });
 
 app.MapGet("/api/system/status", () =>
@@ -343,3 +471,5 @@ app.Run();
 record ZfsPoolRequest(string Name, string VdevType, string[] Devices);
 record LoginRequest(string Username, string Password);
 record ChangePasswordRequest(string CurrentPassword, string NewPassword);
+record SmbShareRequest(string Name, string Path);
+record NfsExportRequest(string Path);

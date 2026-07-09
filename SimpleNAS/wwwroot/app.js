@@ -197,6 +197,71 @@ async function loadShares() {
     }
 }
 
+function showCreateSMB() {
+    document.getElementById('create-smb-modal').classList.remove('hidden');
+}
+
+function hideCreateSMB() {
+    document.getElementById('create-smb-modal').classList.add('hidden');
+}
+
+async function createSMB(event) {
+    event.preventDefault();
+    const name = document.getElementById('smb-name').value;
+    const path = document.getElementById('smb-path').value;
+    
+    try {
+        const response = await fetch(`${API_BASE}/shares/smb`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({name, path})
+        });
+        
+        if (response.ok) {
+            alert('SMB share created successfully!');
+            hideCreateSMB();
+            loadShares();
+        } else {
+            const error = await response.json();
+            alert(`Failed to create SMB share: ${error.error || 'Unknown error'}`);
+        }
+    } catch (error) {
+        alert(`Error: ${error.message}`);
+    }
+}
+
+function showCreateNFS() {
+    document.getElementById('create-nfs-modal').classList.remove('hidden');
+}
+
+function hideCreateNFS() {
+    document.getElementById('create-nfs-modal').classList.add('hidden');
+}
+
+async function createNFS(event) {
+    event.preventDefault();
+    const path = document.getElementById('nfs-path').value;
+    
+    try {
+        const response = await fetch(`${API_BASE}/shares/nfs`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({path})
+        });
+        
+        if (response.ok) {
+            alert('NFS export created successfully!');
+            hideCreateNFS();
+            loadShares();
+        } else {
+            const error = await response.json();
+            alert(`Failed to create NFS export: ${error.error || 'Unknown error'}`);
+        }
+    } catch (error) {
+        alert(`Error: ${error.message}`);
+    }
+}
+
 // Network
 async function loadNetwork() {
     try {
