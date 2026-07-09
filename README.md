@@ -20,6 +20,7 @@ SimpleNAS is an open-source Network Attached Storage (NAS) management solution d
 - 🌐 **Web-based UI** - Modern, responsive dashboard accessible from any device
 - 🚀 **Lightweight** - Minimal resource footprint, runs on Linux systems
 - 🐧 **Linux Native** - Optimized for Ubuntu/Debian with ZFS support
+- ☁️ **Cloud Storage & Hybrid Pools** - Mount Google Drive and combine it with local storage using Rclone + MergerFS
 
 ## 🚀 Quick Start
 
@@ -120,9 +121,10 @@ dotnet run
 ## 📋 Roadmap
 
 - [ ] Multi-user support with role-based access
-- [ ] SMB/NFS share management UI
+- [x] SMB/NFS share management UI
+- [x] Cloud Storage (Rclone & MergerFS) Integration
 - [ ] Automated backups and snapshots
-- [ ] Email/webhook notifications
+- [x] Email/webhook notifications
 - [ ] Docker support
 - [ ] HTTPS/SSL configuration helper
 - [ ] Plugin system for extensibility

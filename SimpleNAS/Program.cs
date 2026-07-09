@@ -878,6 +878,67 @@ app.MapPost("/api/zfs/pools/import", async (HttpContext context) =>
     }
 });
 
+// Background ZFS Pool Health Monitor & Webhook Notifier
+var webhookUrl = builder.Configuration["NotificationSettings:DiscordWebhookUrl"];
+if (!string.IsNullOrWhiteSpace(webhookUrl))
+{
+    _ = Task.Run(async () => {
+        var lastStates = new Dictionary<string, string>();
+        var lastNotified = new Dictionary<string, DateTime>();
+        using var client = new HttpClient();
+        
+        while (true)
+        {
+            try {
+                if (OperatingSystem.IsLinux()) {
+                    var output = RunCommand("zpool", "list", "-H");
+                    if (!string.IsNullOrWhiteSpace(output))
+                    {
+                        var lines = output.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+                        foreach (var line in lines)
+                        {
+                            var fields = line.Split('\t', StringSplitOptions.RemoveEmptyEntries);
+                            if (fields.Length >= 10)
+                            {
+                                var name = fields[0];
+                                var health = fields[9];
+                                
+                                bool isUnhealthy = health != "ONLINE";
+                                bool stateChanged = !lastStates.TryGetValue(name, out var prevHealth) || prevHealth != health;
+                                
+                                lastStates[name] = health;
+                                
+                                if (isUnhealthy)
+                                {
+                                    bool shouldNotify = stateChanged || 
+                                                        !lastNotified.TryGetValue(name, out var lastTime) || 
+                                                        (DateTime.UtcNow - lastTime).TotalHours >= 12;
+                                                        
+                                    if (shouldNotify)
+                                    {
+                                        lastNotified[name] = DateTime.UtcNow;
+                                        var messagePayload = new {
+                                            content = $"⚠️ **[SimpleNAS Alert]**: ZFS pool '**{name}**' is reporting **{health}** status! Immediate attention may be required."
+                                        };
+                                        
+                                        var json = JsonSerializer.Serialize(messagePayload);
+                                        using var content = new StringContent(json, Encoding.UTF8, "application/json");
+                                        await client.PostAsync(webhookUrl, content);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (Exception ex) {
+                Console.WriteLine($"[HealthMonitor Error]: {ex.Message}");
+            }
+            
+            await Task.Delay(TimeSpan.FromMinutes(15));
+        }
+    });
+}
+
 Console.WriteLine("SimpleNAS running on http://0.0.0.0:8000");
 Console.WriteLine("Default login: admin / SimpleNAS2026");
 app.Run();
