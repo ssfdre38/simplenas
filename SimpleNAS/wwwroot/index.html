@@ -116,6 +116,7 @@
                     <button onclick="showTab('dashboard')" class="nav-btn px-4 py-2 text-sm font-semibold rounded-lg text-slate-400 hover:text-white transition-all duration-200 border border-transparent" data-tab="dashboard">Dashboard</button>
                     <button onclick="showTab('zfs')" class="nav-btn px-4 py-2 text-sm font-semibold rounded-lg text-slate-400 hover:text-white transition-all duration-200 border border-transparent" data-tab="zfs">ZFS Storage</button>
                     <button onclick="showTab('shares')" class="nav-btn px-4 py-2 text-sm font-semibold rounded-lg text-slate-400 hover:text-white transition-all duration-200 border border-transparent" data-tab="shares">File Shares</button>
+                    <button onclick="showTab('cloud')" class="nav-btn px-4 py-2 text-sm font-semibold rounded-lg text-slate-400 hover:text-white transition-all duration-200 border border-transparent" data-tab="cloud">Cloud Storage</button>
                     <button onclick="showTab('network')" class="nav-btn px-4 py-2 text-sm font-semibold rounded-lg text-slate-400 hover:text-white transition-all duration-200 border border-transparent" data-tab="network">Network</button>
                     <button onclick="showTab('users')" class="nav-btn px-4 py-2 text-sm font-semibold rounded-lg text-slate-400 hover:text-white transition-all duration-200 border border-transparent" data-tab="users">Users</button>
                 </div>
@@ -453,6 +454,104 @@
                             <button type="button" onclick="hideCreateNFS()" class="bg-slate-800 hover:bg-slate-750 text-slate-300 px-5 py-2.5 rounded-xl transition-all">Cancel</button>
                         </div>
                     </form>
+                </div>
+            </div>
+        </div>
+
+        <!-- CLOUD STORAGE TAB -->
+        <div id="tab-cloud" class="tab-content hidden space-y-6">
+            <div>
+                <h2 class="text-3xl font-bold tracking-tight text-white">Cloud Storage & Hybrid Pools</h2>
+                <p class="text-slate-400 text-sm">Combine your local ZFS array with Google Drive via Rclone and MergerFS</p>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <!-- Rclone Google Drive Mount -->
+                <div class="glass-card rounded-2xl p-6 shadow-xl space-y-4">
+                    <div class="flex items-center space-x-3 mb-2">
+                        <div class="bg-cyan-500/10 p-2.5 rounded-xl border border-cyan-500/20">
+                            <svg class="w-6 h-6 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z"></path>
+                            </svg>
+                        </div>
+                        <div>
+                            <h3 class="text-lg font-bold text-white">Rclone Cloud Mount</h3>
+                            <p class="text-slate-500 text-xs font-mono">Google Drive Remote</p>
+                        </div>
+                    </div>
+                    
+                    <div class="bg-slate-950/50 rounded-xl p-4 border border-slate-900/60">
+                        <div class="flex justify-between items-center text-sm">
+                            <span class="text-slate-400">Mount Status:</span>
+                            <span id="rclone-status" class="font-bold text-rose-500 bg-rose-500/10 px-2.5 py-0.5 rounded-full border border-rose-500/20">Checking...</span>
+                        </div>
+                    </div>
+
+                    <div class="flex space-x-2 pt-2">
+                        <button onclick="mountCloud()" class="flex-1 bg-cyan-500 hover:bg-cyan-600 text-slate-950 font-bold py-2.5 rounded-xl text-sm transition-all duration-200">
+                            Mount GDrive
+                        </button>
+                        <button onclick="unmountCloud()" class="bg-slate-800 hover:bg-slate-750 text-slate-300 font-bold px-4 py-2.5 rounded-xl text-sm transition-all duration-200">
+                            Unmount
+                        </button>
+                    </div>
+                </div>
+
+                <!-- MergerFS Union Pool -->
+                <div class="glass-card rounded-2xl p-6 shadow-xl space-y-4">
+                    <div class="flex items-center space-x-3 mb-2">
+                        <div class="bg-blue-600/10 p-2.5 rounded-xl border border-blue-600/20">
+                            <svg class="w-6 h-6 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path>
+                            </svg>
+                        </div>
+                        <div>
+                            <h3 class="text-lg font-bold text-white">MergerFS Union Pool</h3>
+                            <p class="text-slate-500 text-xs font-mono">Unified Storage Pool</p>
+                        </div>
+                    </div>
+                    
+                    <div class="bg-slate-950/50 rounded-xl p-4 border border-slate-900/60">
+                        <div class="flex justify-between items-center text-sm">
+                            <span class="text-slate-400">Union Status:</span>
+                            <span id="mergerfs-status" class="font-bold text-rose-500 bg-rose-500/10 px-2.5 py-0.5 rounded-full border border-rose-500/20">Checking...</span>
+                        </div>
+                    </div>
+
+                    <div class="flex space-x-2 pt-2">
+                        <button onclick="mountUnion()" class="flex-1 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-600 hover:to-blue-750 text-slate-950 font-bold py-2.5 rounded-xl text-sm transition-all duration-200">
+                            Mount Union Pool
+                        </button>
+                        <button onclick="unmountUnion()" class="bg-slate-800 hover:bg-slate-750 text-slate-300 font-bold px-4 py-2.5 rounded-xl text-sm transition-all duration-200">
+                            Unmount
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Sync Task Status -->
+            <div class="glass-card rounded-2xl p-6 shadow-xl space-y-4">
+                <div class="flex items-center space-x-3">
+                    <div class="bg-purple-500/10 p-2.5 rounded-xl border border-purple-500/20">
+                        <svg class="w-6 h-6 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 1121.21 8H18.21m-6.42 8l-4 4m0 0l-4-4m4 4V9"></path>
+                        </svg>
+                    </div>
+                    <div>
+                        <h3 class="text-lg font-bold text-white">Google Drive Backup Sync Task</h3>
+                        <p class="text-slate-400 text-sm">Automated / Manual file synchronization script</p>
+                    </div>
+                </div>
+                
+                <div class="bg-slate-950/50 rounded-xl p-4 border border-slate-900/60 flex justify-between items-center text-sm">
+                    <span class="text-slate-400">Current Task State:</span>
+                    <span id="sync-status" class="font-bold text-slate-500">Idle (Standby)</span>
+                </div>
+
+                <div class="pt-2">
+                    <button onclick="runSync()" class="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 rounded-xl text-sm transition-all duration-200 border border-purple-500/20">
+                        Run Background Sync Task
+                    </button>
                 </div>
             </div>
         </div>

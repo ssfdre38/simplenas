@@ -1045,6 +1045,87 @@ void DeleteNfsExport(string filePath, string path)
     File.WriteAllLines(filePath, newLines);
 }
 
+// Cloud Storage Manager
+bool isSyncActive = false;
+
+app.MapGet("/api/cloud/status", () =>
+{
+    var mountOutput = RunCommand("mount");
+    bool rcloneMounted = mountOutput.Contains("/mnt/gdrive");
+    bool mergerfsMounted = mountOutput.Contains("/mnt/tank/unified");
+    
+    return Results.Json(new {
+        rcloneMounted = rcloneMounted,
+        rclonePath = "/mnt/gdrive",
+        mergerfsMounted = mergerfsMounted,
+        mergerfsPath = "/mnt/tank/unified",
+        syncActive = isSyncActive
+    });
+});
+
+app.MapPost("/api/cloud/mount", () =>
+{
+    try {
+        if (!Directory.Exists("/mnt/gdrive")) Directory.CreateDirectory("/mnt/gdrive");
+        
+        Task.Run(() => {
+            RunCommand("rclone", "mount", "gdrive:", "/mnt/gdrive", "--vfs-cache-mode", "writes", "--allow-other", "--daemon");
+        });
+        return Results.Ok(new { success = true });
+    } catch (Exception ex) {
+        return Results.Json(new { error = ex.Message }, statusCode: 500);
+    }
+});
+
+app.MapPost("/api/cloud/unmount", () =>
+{
+    try {
+        RunCommand("fusermount", "-u", "/mnt/gdrive");
+        return Results.Ok(new { success = true });
+    } catch (Exception ex) {
+        return Results.Json(new { error = ex.Message }, statusCode: 500);
+    }
+});
+
+app.MapPost("/api/cloud/union", () =>
+{
+    try {
+        if (!Directory.Exists("/mnt/tank/unified")) Directory.CreateDirectory("/mnt/tank/unified");
+        
+        Task.Run(() => {
+            RunCommand("mergerfs", "-o", "defaults,allow_other,use_ino,category.create=ff", "/mnt/tank/local:/mnt/gdrive", "/mnt/tank/unified");
+        });
+        return Results.Ok(new { success = true });
+    } catch (Exception ex) {
+        return Results.Json(new { error = ex.Message }, statusCode: 500);
+    }
+});
+
+app.MapPost("/api/cloud/unmount-union", () =>
+{
+    try {
+        RunCommand("fusermount", "-u", "/mnt/tank/unified");
+        return Results.Ok(new { success = true });
+    } catch (Exception ex) {
+        return Results.Json(new { error = ex.Message }, statusCode: 500);
+    }
+});
+
+app.MapPost("/api/cloud/sync", () =>
+{
+    if (isSyncActive) return Results.Conflict(new { error = "Sync task is already running." });
+    
+    isSyncActive = true;
+    Task.Run(() => {
+        try {
+            RunCommand("rclone", "move", "/mnt/tank/local/Backups", "gdrive:Backups", "--min-age", "30d");
+        } finally {
+            isSyncActive = false;
+        }
+    });
+    return Results.Ok(new { success = true });
+});
+
 record ZfsPoolRequest(string Name, string VdevType, string[] Devices);
 record LoginRequest(string Username, string Password);
 record ChangePasswordRequest(string CurrentPassword, string NewPassword);

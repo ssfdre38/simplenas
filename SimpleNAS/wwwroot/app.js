@@ -23,6 +23,9 @@ function showTab(tabName) {
         case 'shares':
             loadShares();
             break;
+        case 'cloud':
+            loadCloud();
+            break;
         case 'network':
             loadNetwork();
             loadFirewallStatus();
@@ -1169,3 +1172,114 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     }, 5000);
 });
+
+// Cloud Storage Manager
+async function loadCloud() {
+    try {
+        const response = await fetch(`${API_BASE}/cloud/status`);
+        const data = await response.json();
+        
+        const rcloneStatus = document.getElementById('rclone-status');
+        if (data.rcloneMounted) {
+            rcloneStatus.className = "font-bold text-emerald-400 bg-emerald-500/10 px-2.5 py-0.5 rounded-full border border-emerald-500/20 text-xs";
+            rcloneStatus.textContent = "Active";
+        } else {
+            rcloneStatus.className = "font-bold text-rose-500 bg-rose-500/10 px-2.5 py-0.5 rounded-full border border-rose-500/20 text-xs";
+            rcloneStatus.textContent = "Inactive";
+        }
+        
+        const mergerfsStatus = document.getElementById('mergerfs-status');
+        if (data.mergerfsMounted) {
+            mergerfsStatus.className = "font-bold text-emerald-400 bg-emerald-500/10 px-2.5 py-0.5 rounded-full border border-emerald-500/20 text-xs";
+            mergerfsStatus.textContent = "Active";
+        } else {
+            mergerfsStatus.className = "font-bold text-rose-500 bg-rose-500/10 px-2.5 py-0.5 rounded-full border border-rose-500/20 text-xs";
+            mergerfsStatus.textContent = "Inactive";
+        }
+
+        const syncStatus = document.getElementById('sync-status');
+        if (data.syncActive) {
+            syncStatus.className = "font-bold text-purple-400 animate-pulse text-xs";
+            syncStatus.textContent = "Syncing Files in Background...";
+        } else {
+            syncStatus.className = "font-bold text-slate-500 text-xs";
+            syncStatus.textContent = "Idle (Standby)";
+        }
+    } catch (error) {
+        console.error('Cloud load error:', error);
+    }
+}
+
+async function mountCloud() {
+    try {
+        const response = await fetch(`${API_BASE}/cloud/mount`, { method: 'POST' });
+        const res = await response.json();
+        if (response.ok) {
+            alert('Cloud mount triggered successfully.');
+        } else {
+            alert(`Error: ${res.error || 'Failed to mount cloud storage'}`);
+        }
+        loadCloud();
+    } catch (error) {
+        alert(`Error: ${error.message}`);
+    }
+}
+
+async function unmountCloud() {
+    try {
+        const response = await fetch(`${API_BASE}/cloud/unmount`, { method: 'POST' });
+        const res = await response.json();
+        if (response.ok) {
+            alert('Cloud unmount triggered successfully.');
+        } else {
+            alert(`Error: ${res.error || 'Failed to unmount cloud storage'}`);
+        }
+        loadCloud();
+    } catch (error) {
+        alert(`Error: ${error.message}`);
+    }
+}
+
+async function mountUnion() {
+    try {
+        const response = await fetch(`${API_BASE}/cloud/union`, { method: 'POST' });
+        const res = await response.json();
+        if (response.ok) {
+            alert('Union pool mounted successfully.');
+        } else {
+            alert(`Error: ${res.error || 'Failed to mount union pool'}`);
+        }
+        loadCloud();
+    } catch (error) {
+        alert(`Error: ${error.message}`);
+    }
+}
+
+async function unmountUnion() {
+    try {
+        const response = await fetch(`${API_BASE}/cloud/unmount-union`, { method: 'POST' });
+        const res = await response.json();
+        if (response.ok) {
+            alert('Union pool unmounted successfully.');
+        } else {
+            alert(`Error: ${res.error || 'Failed to unmount union pool'}`);
+        }
+        loadCloud();
+    } catch (error) {
+        alert(`Error: ${error.message}`);
+    }
+}
+
+async function runSync() {
+    try {
+        const response = await fetch(`${API_BASE}/cloud/sync`, { method: 'POST' });
+        if (response.ok) {
+            alert('Background backup sync task started!');
+        } else {
+            alert('Failed to trigger background sync task.');
+        }
+        loadCloud();
+    } catch (error) {
+        alert(`Error: ${error.message}`);
+    }
+}
