@@ -114,12 +114,35 @@
             <div class="flex items-center space-x-4">
                 <div class="flex space-x-2 bg-slate-900/60 p-1.5 rounded-xl border border-slate-800/80">
                     <button onclick="showTab('dashboard')" class="nav-btn px-4 py-2 text-sm font-semibold rounded-lg text-slate-400 hover:text-white transition-all duration-200 border border-transparent" data-tab="dashboard">Dashboard</button>
-                    <button onclick="showTab('zfs')" class="nav-btn px-4 py-2 text-sm font-semibold rounded-lg text-slate-400 hover:text-white transition-all duration-200 border border-transparent" data-tab="zfs">ZFS Storage</button>
+                    <button onclick="showTab('zfs')" class="nav-btn px-4 py-2 text-sm font-semibold rounded-lg text-slate-400 hover:text-white transition-all duration-200 border border-transparent" data-tab="zfs"><span id="nav-storage-label">Storage Pools</span></button>
                     <button onclick="showTab('shares')" class="nav-btn px-4 py-2 text-sm font-semibold rounded-lg text-slate-400 hover:text-white transition-all duration-200 border border-transparent" data-tab="shares">File Shares</button>
                     <button onclick="showTab('cloud')" class="nav-btn px-4 py-2 text-sm font-semibold rounded-lg text-slate-400 hover:text-white transition-all duration-200 border border-transparent" data-tab="cloud">Cloud Storage</button>
                     <button onclick="showTab('network')" class="nav-btn px-4 py-2 text-sm font-semibold rounded-lg text-slate-400 hover:text-white transition-all duration-200 border border-transparent" data-tab="network">Network</button>
                     <button onclick="showTab('users')" class="nav-btn px-4 py-2 text-sm font-semibold rounded-lg text-slate-400 hover:text-white transition-all duration-200 border border-transparent" data-tab="users">Users</button>
+                    <button onclick="showTab('plugins')" class="nav-btn px-4 py-2 text-sm font-semibold rounded-lg text-slate-400 hover:text-white transition-all duration-200 border border-transparent flex items-center space-x-1.5" data-tab="plugins">
+                        <span>Plugins</span>
+                        <span id="plugins-nav-count" class="bg-cyan-500/20 text-cyan-400 text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold">2</span>
+                    </button>
                 </div>
+                
+                <!-- Active User & Role Badge -->
+                <div onclick="showChangeOwnPassword()" class="cursor-pointer hidden sm:flex items-center space-x-2 bg-slate-900/80 hover:bg-slate-800/80 px-3 py-1.5 rounded-xl border border-slate-800 hover:border-cyan-500/40 text-xs transition-all select-none group" title="Click to change your password">
+                    <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                    <span id="header-username" class="font-bold text-white">admin</span>
+                    <span id="header-user-role" class="px-2 py-0.5 text-[10px] uppercase font-bold tracking-wider rounded-md bg-purple-500/20 text-purple-400 border border-purple-500/30">Admin</span>
+                    <button type="button" onclick="event.stopPropagation(); showChangeOwnPassword()" class="p-1 rounded-md bg-slate-800/60 group-hover:bg-cyan-500/20 text-slate-400 group-hover:text-cyan-400 hover:text-cyan-300 transition-colors ml-0.5 cursor-pointer" title="Change Password">
+                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"></path></svg>
+                    </button>
+                </div>
+
+                <!-- SSL Indicator Badge -->
+                <div id="header-ssl-badge" onclick="showTab('network')" class="cursor-pointer hidden md:flex items-center space-x-1.5 px-3 py-1.5 rounded-xl text-xs bg-slate-900/80 border border-slate-800 text-slate-400 hover:text-cyan-400 hover:border-cyan-500/30 transition-all" title="View SSL/TLS Settings">
+                    <svg class="w-3.5 h-3.5 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 00-2 2zm10-10V7a4 4 0 00-8 0v4h8z"></path>
+                    </svg>
+                    <span id="header-ssl-text" class="text-[11px] font-mono">SSL: 8443</span>
+                </div>
+
                 <button onclick="handleLogout()" class="bg-rose-500/10 hover:bg-rose-500/20 text-rose-500 border border-rose-500/20 px-3.5 py-2 text-xs font-bold rounded-xl transition-all" title="Sign Out">
                     Sign Out
                 </button>
@@ -191,6 +214,42 @@
                 </div>
             </div>
 
+            <!-- SYSTEM & EXTENSIONS QUICK STATUS -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div onclick="showTab('zfs')" class="glass-card rounded-2xl p-4 shadow-lg border border-slate-800 hover:border-cyan-500/40 transition-all cursor-pointer group">
+                    <div class="flex items-center justify-between">
+                        <span class="text-xs font-mono uppercase tracking-wider text-slate-400">Snapshots</span>
+                        <span id="dash-snap-badge" class="px-2 py-0.5 text-[10px] font-bold rounded-md bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">Ready</span>
+                    </div>
+                    <h4 class="text-sm font-bold text-white mt-2 group-hover:text-cyan-400 transition-colors">Backup Scheduler</h4>
+                    <p class="text-xs text-slate-400 mt-0.5" id="dash-snap-sub">Automated ZFS protection</p>
+                </div>
+                <div onclick="showTab('network')" class="glass-card rounded-2xl p-4 shadow-lg border border-slate-800 hover:border-cyan-500/40 transition-all cursor-pointer group">
+                    <div class="flex items-center justify-between">
+                        <span class="text-xs font-mono uppercase tracking-wider text-slate-400">SSL / TLS</span>
+                        <span id="dash-ssl-badge" class="px-2 py-0.5 text-[10px] font-bold rounded-md bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">HTTPS :8443</span>
+                    </div>
+                    <h4 class="text-sm font-bold text-white mt-2 group-hover:text-cyan-400 transition-colors">Encryption Helper</h4>
+                    <p class="text-xs text-slate-400 mt-0.5" id="dash-ssl-sub">Let's Encrypt & SAN</p>
+                </div>
+                <div onclick="showTab('plugins')" class="glass-card rounded-2xl p-4 shadow-lg border border-slate-800 hover:border-cyan-500/40 transition-all cursor-pointer group">
+                    <div class="flex items-center justify-between">
+                        <span class="text-xs font-mono uppercase tracking-wider text-slate-400">Extensions</span>
+                        <span id="dash-plugin-badge" class="px-2 py-0.5 text-[10px] font-bold rounded-md bg-purple-500/10 text-purple-400 border border-purple-500/20">Active</span>
+                    </div>
+                    <h4 class="text-sm font-bold text-white mt-2 group-hover:text-cyan-400 transition-colors">Plugin Center</h4>
+                    <p class="text-xs text-slate-400 mt-0.5" id="dash-plugin-sub">Docker, Media, VPNs</p>
+                </div>
+                <div onclick="showTab('users')" class="glass-card rounded-2xl p-4 shadow-lg border border-slate-800 hover:border-cyan-500/40 transition-all cursor-pointer group">
+                    <div class="flex items-center justify-between">
+                        <span class="text-xs font-mono uppercase tracking-wider text-slate-400">Security</span>
+                        <span id="dash-rbac-badge" class="px-2 py-0.5 text-[10px] font-bold rounded-md bg-amber-500/10 text-amber-400 border border-amber-500/20">3 Roles</span>
+                    </div>
+                    <h4 class="text-sm font-bold text-white mt-2 group-hover:text-cyan-400 transition-colors">Multi-User RBAC</h4>
+                    <p class="text-xs text-slate-400 mt-0.5" id="dash-rbac-sub">Admin / Operator / Viewer</p>
+                </div>
+            </div>
+
             <!-- SERVICE CONTROL CENTER -->
             <div class="glass-card rounded-2xl p-6 shadow-xl">
                 <div class="flex items-center space-x-2 mb-6">
@@ -208,8 +267,8 @@
         <div id="tab-zfs" class="tab-content hidden space-y-6">
             <div class="flex justify-between items-center">
                 <div>
-                    <h2 class="text-3xl font-bold tracking-tight text-white">ZFS Storage Center</h2>
-                    <p class="text-slate-400 text-sm">Manage ZFS RAID pools, datasets, and logical disks</p>
+                    <h2 id="storage-center-title" class="text-3xl font-bold tracking-tight text-white">Storage Center</h2>
+                    <p id="storage-center-desc" class="text-slate-400 text-sm">Manage storage pools, datasets, and logical disks</p>
                 </div>
                 <div class="flex space-x-3">
                     <button onclick="showImportPool()" class="bg-slate-800 hover:bg-slate-700 text-cyan-400 border border-cyan-500/20 font-bold px-5 py-2.5 rounded-xl transition-all">
@@ -227,7 +286,7 @@
                     <div class="glass-card rounded-2xl p-6 shadow-xl">
                         <h3 class="text-xl font-bold text-white mb-4 flex items-center space-x-2">
                             <span class="w-2.5 h-2.5 rounded-full bg-cyan-500"></span>
-                            <span>ZFS Pools</span>
+                            <span id="storage-pools-heading">Storage Pools</span>
                         </h3>
                         <div id="pools-list" class="space-y-4"></div>
                     </div>
@@ -236,7 +295,7 @@
                         <div class="flex justify-between items-center mb-4">
                             <h3 class="text-xl font-bold text-white flex items-center space-x-2">
                                 <span class="w-2.5 h-2.5 rounded-full bg-cyan-500"></span>
-                                <span>ZFS Datasets & Mounts</span>
+                                <span id="storage-datasets-heading">Datasets & Mounts</span>
                             </h3>
                             <button onclick="showCreateDataset()" class="bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 border border-cyan-500/20 text-xs font-semibold px-3 py-1.5 rounded-lg transition-all">
                                 + Create Dataset
@@ -247,11 +306,67 @@
                         </div>
                     </div>
 
+                    <!-- Automated Snapshot Scheduler -->
+                    <div class="glass-card rounded-2xl p-6 shadow-xl space-y-4">
+                        <div class="flex justify-between items-center">
+                            <h3 class="text-xl font-bold text-white flex items-center space-x-2">
+                                <span class="w-2.5 h-2.5 rounded-full bg-cyan-400"></span>
+                                <span>Automated Snapshot Scheduler</span>
+                            </h3>
+                            <button onclick="runSnapshotNow()" class="bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 border border-cyan-500/20 text-xs font-semibold px-3 py-1.5 rounded-lg transition-all">
+                                ⚡ Run Snapshot Cycle Now
+                            </button>
+                        </div>
+                        
+                        <div class="grid grid-cols-1 md:grid-cols-4 gap-4 bg-slate-950/40 p-4 rounded-xl border border-slate-850">
+                            <div>
+                                <span class="text-xs text-slate-400 block font-mono">Status:</span>
+                                <span id="sched-status" class="font-bold text-slate-300 text-sm">Disabled</span>
+                            </div>
+                            <div>
+                                <span class="text-xs text-slate-400 block font-mono">Frequency:</span>
+                                <span id="sched-freq" class="font-bold text-slate-300 text-sm">Daily</span>
+                            </div>
+                            <div>
+                                <span class="text-xs text-slate-400 block font-mono">Retention:</span>
+                                <span id="sched-retention" class="font-bold text-slate-300 text-sm">7 Snapshots</span>
+                            </div>
+                            <div>
+                                <span class="text-xs text-slate-400 block font-mono">Next Run:</span>
+                                <span id="sched-next" class="font-bold text-cyan-400 text-xs font-mono">Standby</span>
+                            </div>
+                        </div>
+
+                        <form onsubmit="saveSnapshotSchedule(event)" class="grid grid-cols-1 md:grid-cols-4 gap-3 pt-2 items-end">
+                            <div class="flex items-center space-x-2 mb-2">
+                                <input type="checkbox" id="sched-enable" class="h-4 w-4 bg-slate-900 border-slate-700 text-cyan-500 rounded">
+                                <label for="sched-enable" class="text-xs font-bold text-slate-300">Enable Schedule</label>
+                            </div>
+                            <div>
+                                <label class="block text-[11px] font-bold text-slate-400 uppercase mb-1">Frequency</label>
+                                <select id="sched-freq-input" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:border-cyan-500 focus:outline-none">
+                                    <option value="hourly">Hourly</option>
+                                    <option value="daily" selected>Daily</option>
+                                    <option value="weekly">Weekly</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-[11px] font-bold text-slate-400 uppercase mb-1">Keep Retention Count</label>
+                                <input type="number" id="sched-retention-input" min="1" max="100" value="7" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:border-cyan-500 focus:outline-none" required>
+                            </div>
+                            <div>
+                                <button type="submit" class="w-full bg-cyan-500 hover:bg-cyan-600 text-slate-950 font-bold text-xs py-2.5 rounded-xl transition-all">
+                                    Save Schedule
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+
                     <div class="glass-card rounded-2xl p-6 shadow-xl">
                         <div class="flex justify-between items-center mb-4">
                             <h3 class="text-xl font-bold text-white flex items-center space-x-2">
                                 <span class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
-                                <span>ZFS Instant Snapshots (Backups)</span>
+                                <span id="storage-snapshots-heading">Storage Snapshots (Backups)</span>
                             </h3>
                             <button onclick="showCreateSnapshot()" class="bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 text-xs font-semibold px-3 py-1.5 rounded-lg transition-all">
                                 + Take Snapshot
@@ -377,7 +492,7 @@
                             <svg class="w-5 h-5 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path>
                             </svg>
-                            <span>SMB Shares</span>
+                            <span id="shares-smb-heading">SMB & Windows File Sharing</span>
                         </h3>
                         <button onclick="showCreateSMB()" class="bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 border border-cyan-500/20 text-xs font-semibold px-3 py-1.5 rounded-lg transition-all">
                             + New SMB Share
@@ -414,7 +529,7 @@
                         </div>
                         <div class="mb-4">
                             <label class="block mb-2 text-sm font-semibold text-slate-300">Absolute Directory Path</label>
-                            <input type="text" id="smb-path" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:border-cyan-500 focus:outline-none" placeholder="/storage" required>
+                            <input type="text" id="smb-path" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:border-cyan-500 focus:outline-none" placeholder="/storage or D:\Media" required>
                         </div>
                         <div class="mb-4 flex items-center">
                             <input type="checkbox" id="smb-readonly" class="mr-2 h-4 w-4 bg-slate-900 border-slate-700 text-cyan-500 rounded">
@@ -657,6 +772,88 @@
                             </button>
                         </form>
                     </div>
+
+                    <!-- SSL / TLS Encryption & Let's Encrypt Card -->
+                    <div class="glass-card rounded-2xl p-6 shadow-xl space-y-4">
+                        <div class="flex items-center space-x-3">
+                            <div class="p-2.5 bg-emerald-500/10 rounded-xl border border-emerald-500/20 text-emerald-400">
+                                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 00-2 2zm10-10V7a4 4 0 00-8 0v4h8z"></path>
+                                </svg>
+                            </div>
+                            <div>
+                                <h3 class="text-xl font-bold text-white">SSL / TLS Encryption & Let's Encrypt</h3>
+                                <p class="text-slate-400 text-sm">Secure your connection with automatic Let's Encrypt ACME certificates or self-signed SSL</p>
+                            </div>
+                        </div>
+
+                        <div class="bg-slate-950/40 p-4 rounded-xl border border-slate-850 grid grid-cols-1 md:grid-cols-4 gap-4 text-xs font-mono">
+                            <div>
+                                <span class="text-slate-500 block uppercase">SSL Status:</span>
+                                <span id="ssl-status-badge" class="font-bold text-slate-300">Checking...</span>
+                            </div>
+                            <div>
+                                <span class="text-slate-500 block uppercase">Domain:</span>
+                                <span id="ssl-domain" class="font-bold text-slate-300">None</span>
+                            </div>
+                            <div>
+                                <span class="text-slate-500 block uppercase">Expires:</span>
+                                <span id="ssl-expires" class="font-bold text-slate-300">N/A</span>
+                            </div>
+                            <div>
+                                <span class="text-slate-500 block uppercase">HTTPS Port:</span>
+                                <span id="ssl-port" class="font-bold text-cyan-400">8443</span>
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
+                            <!-- Let's Encrypt ACME Form -->
+                            <div class="p-4 bg-slate-900/60 rounded-xl border border-slate-800 space-y-3">
+                                <h4 class="font-bold text-white text-sm flex items-center space-x-1.5">
+                                    <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
+                                    <span>Automatic Let's Encrypt (ACME v2)</span>
+                                </h4>
+                                <p class="text-slate-400 text-xs">Orders and signs a publicly trusted certificate automatically via ACME HTTP-01.</p>
+                                <form onsubmit="requestLetsEncrypt(event)" class="space-y-2.5">
+                                    <div>
+                                        <label class="block text-[11px] font-bold text-slate-400 uppercase mb-1">Domain FQDN</label>
+                                        <input type="text" id="le-domain" class="w-full bg-slate-950 border border-slate-750 rounded-lg px-3 py-2 text-xs text-white focus:border-cyan-500 focus:outline-none" placeholder="nas.yourdomain.com" required>
+                                    </div>
+                                    <div>
+                                        <label class="block text-[11px] font-bold text-slate-400 uppercase mb-1">Notification Email</label>
+                                        <input type="email" id="le-email" class="w-full bg-slate-950 border border-slate-750 rounded-lg px-3 py-2 text-xs text-white focus:border-cyan-500 focus:outline-none" placeholder="admin@yourdomain.com" required>
+                                    </div>
+                                    <div class="flex items-center space-x-2 pt-1">
+                                        <input type="checkbox" id="le-staging" class="h-3.5 w-3.5 bg-slate-900 border-slate-700 text-cyan-500 rounded">
+                                        <label for="le-staging" class="text-xs text-slate-400">Staging Mode (Testing)</label>
+                                    </div>
+                                    <button type="submit" id="le-submit-btn" class="w-full bg-emerald-500 hover:bg-emerald-600 text-slate-950 text-xs font-bold py-2.5 rounded-lg transition-all mt-2">
+                                        Request & Install Let's Encrypt SSL
+                                    </button>
+                                </form>
+                            </div>
+
+                            <!-- Self-Signed Certificate Form -->
+                            <div class="p-4 bg-slate-900/60 rounded-xl border border-slate-800 space-y-3">
+                                <h4 class="font-bold text-white text-sm flex items-center space-x-1.5">
+                                    <span class="w-2 h-2 rounded-full bg-cyan-400"></span>
+                                    <span>Self-Signed SSL Certificate</span>
+                                </h4>
+                                <p class="text-slate-400 text-xs">Instantly creates a local 2048-bit RSA certificate for encrypted HTTPS on your LAN.</p>
+                                <form onsubmit="generateSelfSigned(event)" class="space-y-2.5">
+                                    <div>
+                                        <label class="block text-[11px] font-bold text-slate-400 uppercase mb-1">Hostname / Subject</label>
+                                        <input type="text" id="self-domain" class="w-full bg-slate-950 border border-slate-750 rounded-lg px-3 py-2 text-xs text-white focus:border-cyan-500 focus:outline-none" placeholder="localhost or nas.local" value="localhost" required>
+                                    </div>
+                                    <div class="pt-8">
+                                        <button type="submit" id="self-submit-btn" class="w-full bg-cyan-500 hover:bg-cyan-600 text-slate-950 text-xs font-bold py-2.5 rounded-lg transition-all">
+                                            Generate Self-Signed Certificate
+                                        </button>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- Network Interfaces (1/3 width) -->
@@ -672,14 +869,20 @@
 
         <!-- USERS TAB -->
         <div id="tab-users" class="tab-content hidden space-y-6">
-            <div class="flex justify-between items-center">
+            <div class="flex flex-col sm:flex-row justify-between sm:items-center gap-4">
                 <div>
                     <h2 class="text-3xl font-bold tracking-tight text-white">User Account Manager</h2>
                     <p class="text-slate-400 text-sm">Add and manage secure Samba and system accounts for network access</p>
                 </div>
-                <button onclick="showCreateUser()" class="bg-cyan-500 hover:bg-cyan-600 text-slate-950 font-bold px-5 py-2.5 rounded-xl shadow-lg shadow-cyan-500/10 transition-all duration-200">
-                    Add New NAS User
-                </button>
+                <div class="flex items-center space-x-3">
+                    <button onclick="showChangeOwnPassword()" class="bg-slate-800 hover:bg-slate-700 text-cyan-400 border border-cyan-500/20 font-bold px-4 py-2.5 rounded-xl transition-all flex items-center space-x-2 text-sm">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"></path></svg>
+                        <span>Change Password</span>
+                    </button>
+                    <button onclick="showCreateUser()" class="bg-cyan-500 hover:bg-cyan-600 text-slate-950 font-bold px-5 py-2.5 rounded-xl shadow-lg shadow-cyan-500/10 transition-all duration-200 text-sm">
+                        + Add New NAS User
+                    </button>
+                </div>
             </div>
             
             <div class="glass-card rounded-2xl p-6 shadow-xl max-w-4xl">
@@ -693,27 +896,187 @@
                     <p class="text-slate-500 text-sm">Scanning for NAS user accounts...</p>
                 </div>
             </div>
+        </div>
 
-            <!-- Create User Modal -->
-            <div id="create-user-modal" class="hidden fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center z-50">
-                <div class="glass-card rounded-2xl p-6 w-full max-w-md shadow-2xl">
-                    <h3 class="text-xl font-bold text-white mb-4">Add New NAS User</h3>
-                    <form onsubmit="createUser(event)">
-                        <div class="mb-4">
-                            <label class="block mb-2 text-sm font-semibold text-slate-300">Username</label>
-                            <input type="text" id="user-username" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:border-cyan-500 focus:outline-none" placeholder="e.g., media_user" required>
-                        </div>
-                        <div class="mb-5">
-                            <label class="block mb-2 text-sm font-semibold text-slate-300">Password</label>
-                            <input type="password" id="user-password" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:border-cyan-500 focus:outline-none" placeholder="••••••••" required>
-                        </div>
-                        <div class="flex gap-2">
-                            <button type="submit" class="bg-cyan-500 hover:bg-cyan-600 text-slate-950 font-bold px-5 py-2.5 rounded-xl transition-all">Add User</button>
-                            <button type="button" onclick="hideCreateUser()" class="bg-slate-800 hover:bg-slate-750 text-slate-300 px-5 py-2.5 rounded-xl transition-all">Cancel</button>
-                        </div>
-                    </form>
+        <!-- PLUGINS & EXTENSION CENTER TAB -->
+        <div id="tab-plugins" class="tab-content hidden space-y-6">
+            <div class="flex flex-col sm:flex-row justify-between sm:items-center gap-4">
+                <div>
+                    <h2 class="text-3xl font-bold tracking-tight text-white flex items-center space-x-3">
+                        <span>Plugin & Extension Center</span>
+                        <span class="text-xs bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 px-2.5 py-1 rounded-full font-mono uppercase font-bold tracking-wider">v1.0 Extensible</span>
+                    </h2>
+                    <p class="text-slate-400 text-sm">Extend SimpleNAS with 1-click media servers, secure VPNs, cloud synchronizers, and system utilities.</p>
+                </div>
+                <div class="flex items-center space-x-3">
+                    <button onclick="refreshPlugins()" class="bg-slate-800 hover:bg-slate-700 text-slate-300 px-4 py-2 rounded-xl text-sm font-semibold border border-slate-700 transition-all flex items-center space-x-2">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                        </svg>
+                        <span>Refresh Catalog</span>
+                    </button>
                 </div>
             </div>
+
+            <!-- Metric Stats Row -->
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-6">
+                <div class="glass-card rounded-2xl p-5 shadow-xl flex items-center space-x-4 border border-slate-800">
+                    <div class="bg-cyan-500/10 text-cyan-400 p-3 rounded-xl border border-cyan-500/20">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                        </svg>
+                    </div>
+                    <div>
+                        <p class="text-xs font-mono text-slate-400 uppercase tracking-wider">Active Services</p>
+                        <h4 id="plugin-stat-active" class="text-2xl font-extrabold text-white">--</h4>
+                    </div>
+                </div>
+                <div class="glass-card rounded-2xl p-5 shadow-xl flex items-center space-x-4 border border-slate-800">
+                    <div class="bg-purple-500/10 text-purple-400 p-3 rounded-xl border border-purple-500/20">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path>
+                        </svg>
+                    </div>
+                    <div>
+                        <p class="text-xs font-mono text-slate-400 uppercase tracking-wider">Marketplace Catalog</p>
+                        <h4 id="plugin-stat-catalog" class="text-2xl font-extrabold text-white">8 Available</h4>
+                    </div>
+                </div>
+                <div class="glass-card rounded-2xl p-5 shadow-xl flex items-center space-x-4 border border-slate-800">
+                    <div class="bg-emerald-500/10 text-emerald-400 p-3 rounded-xl border border-emerald-500/20">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+                        </svg>
+                    </div>
+                    <div>
+                        <p class="text-xs font-mono text-slate-400 uppercase tracking-wider">Plugin Engine</p>
+                        <h4 class="text-2xl font-extrabold text-white">.NET 10 / C# 14</h4>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Filters & Search Toolbar -->
+            <div class="glass-card rounded-2xl p-4 shadow-xl flex flex-col md:flex-row items-center justify-between gap-4 border border-slate-800">
+                <div class="flex flex-wrap gap-2" id="plugin-category-filters">
+                    <button onclick="filterPlugins('all')" class="plugin-filter-btn px-3 py-1.5 rounded-lg text-xs font-semibold bg-cyan-500/20 text-cyan-400 border border-cyan-500/40" data-category="all">All</button>
+                    <button onclick="filterPlugins('installed')" class="plugin-filter-btn px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-900 text-slate-400 hover:text-white border border-slate-800" data-category="installed">Installed</button>
+                    <button onclick="filterPlugins('Media')" class="plugin-filter-btn px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-900 text-slate-400 hover:text-white border border-slate-800" data-category="Media">Media</button>
+                    <button onclick="filterPlugins('Network')" class="plugin-filter-btn px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-900 text-slate-400 hover:text-white border border-slate-800" data-category="Network">Network & VPN</button>
+                    <button onclick="filterPlugins('Cloud & Backup')" class="plugin-filter-btn px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-900 text-slate-400 hover:text-white border border-slate-800" data-category="Cloud & Backup">Cloud & Backup</button>
+                    <button onclick="filterPlugins('Tools')" class="plugin-filter-btn px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-900 text-slate-400 hover:text-white border border-slate-800" data-category="Tools">Tools</button>
+                    <button onclick="filterPlugins('System')" class="plugin-filter-btn px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-900 text-slate-400 hover:text-white border border-slate-800" data-category="System">System</button>
+                </div>
+                <div class="w-full md:w-64 relative">
+                    <span class="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-500">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+                        </svg>
+                    </span>
+                    <input type="text" id="plugin-search" oninput="searchPlugins(event)" placeholder="Search plugins..." class="w-full bg-slate-900 border border-slate-800 rounded-xl pl-9 pr-3 py-1.5 text-xs text-white placeholder-slate-500 focus:border-cyan-500 focus:outline-none">
+                </div>
+            </div>
+
+            <!-- Plugin Cards Grid -->
+            <div id="plugins-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                <!-- Dynamically populated by app.js -->
+            </div>
+        </div>
+    </div>
+
+    <!-- GLOBAL APPLICATION MODALS (Accessible from any tab or header) -->
+
+    <!-- Create User Modal -->
+    <div id="create-user-modal" onclick="if(event.target === this) hideCreateUser()" class="hidden fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+        <div class="glass-card rounded-2xl p-6 w-full max-w-md shadow-2xl space-y-4 border border-slate-800">
+            <h3 class="text-xl font-bold text-white mb-2">Add New NAS User</h3>
+            <form onsubmit="createUser(event)" class="space-y-4">
+                <div>
+                    <label class="block mb-1.5 text-xs font-bold text-slate-400 uppercase">Username</label>
+                    <input type="text" id="user-username" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:border-cyan-500 focus:outline-none" placeholder="e.g., media_user" required>
+                </div>
+                <div>
+                    <label class="block mb-1.5 text-xs font-bold text-slate-400 uppercase">Password</label>
+                    <input type="password" id="user-password" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:border-cyan-500 focus:outline-none" placeholder="••••••••" required>
+                </div>
+                <div>
+                    <label class="block mb-1.5 text-xs font-bold text-slate-400 uppercase">Role / Access Level</label>
+                    <select id="user-role" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:border-cyan-500 focus:outline-none">
+                        <option value="Operator">Operator (Manage Storage, Shares & Services)</option>
+                        <option value="Admin">Administrator (Full Access & Configuration)</option>
+                        <option value="Viewer">Viewer (Read-Only Telemetry & Monitoring)</option>
+                    </select>
+                </div>
+                <div class="flex justify-end gap-2 pt-2 border-t border-slate-800/80">
+                    <button type="button" onclick="hideCreateUser()" class="bg-slate-800 hover:bg-slate-750 text-slate-300 px-4 py-2 rounded-xl text-sm font-semibold transition-all">Cancel</button>
+                    <button type="submit" class="bg-cyan-500 hover:bg-cyan-600 text-slate-950 font-bold px-5 py-2 rounded-xl text-sm transition-all">Add User</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Change / Reset Password Modal -->
+    <div id="change-password-modal" onclick="if(event.target === this) hideChangePassword()" class="hidden fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+        <div class="glass-card rounded-2xl p-6 w-full max-w-md shadow-2xl space-y-4 border border-slate-800">
+            <div class="flex justify-between items-center border-b border-slate-800/80 pb-3">
+                <h3 class="text-xl font-bold text-white flex items-center space-x-2">
+                    <svg class="w-5 h-5 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"></path></svg>
+                    <span id="pwd-modal-heading">Change Password</span>
+                </h3>
+                <button onclick="hideChangePassword()" class="text-slate-400 hover:text-white text-xl leading-none">&times;</button>
+            </div>
+
+            <form onsubmit="handlePasswordSubmit(event)" class="space-y-4">
+                <input type="hidden" id="pwd-target-user">
+                <input type="hidden" id="pwd-mode"> <!-- 'self' or 'admin-reset' -->
+
+                <div id="pwd-current-container">
+                    <label class="block mb-1.5 text-xs font-bold text-slate-400 uppercase">Current Password</label>
+                    <input type="password" id="pwd-current" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-sm text-white focus:border-cyan-500 focus:outline-none placeholder-slate-600" placeholder="••••••••">
+                </div>
+
+                <div>
+                    <label class="block mb-1.5 text-xs font-bold text-slate-400 uppercase">New Password</label>
+                    <input type="password" id="pwd-new" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-sm text-white focus:border-cyan-500 focus:outline-none placeholder-slate-600" placeholder="Enter new password (min. 6 chars)" required>
+                </div>
+
+                <div>
+                    <label class="block mb-1.5 text-xs font-bold text-slate-400 uppercase">Confirm New Password</label>
+                    <input type="password" id="pwd-confirm" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-sm text-white focus:border-cyan-500 focus:outline-none placeholder-slate-600" placeholder="Re-enter new password" required>
+                </div>
+
+                <div id="pwd-error-msg" class="hidden text-rose-400 text-xs font-semibold bg-rose-500/10 border border-rose-500/20 p-2.5 rounded-xl"></div>
+
+                <div class="flex justify-end gap-2 pt-2 border-t border-slate-800/80">
+                    <button type="button" onclick="hideChangePassword()" class="bg-slate-800 hover:bg-slate-750 text-slate-300 px-4 py-2 rounded-xl text-sm font-semibold transition-all">Cancel</button>
+                    <button type="submit" id="pwd-submit-btn" class="bg-cyan-500 hover:bg-cyan-600 text-slate-950 font-bold px-5 py-2 rounded-xl text-sm transition-all">Update Password</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Plugin Config Modal -->
+    <div id="plugin-config-modal" onclick="if(event.target === this) hidePluginConfig()" class="hidden fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+        <div class="glass-card rounded-2xl p-6 w-full max-w-lg shadow-2xl space-y-4 border border-slate-800">
+            <div class="flex justify-between items-center border-b border-slate-800/80 pb-3">
+                <h3 class="text-xl font-bold text-white flex items-center space-x-2" id="plugin-modal-title">
+                    <span>Plugin Settings</span>
+                </h3>
+                <button onclick="hidePluginConfig()" class="text-slate-400 hover:text-white text-xl leading-none">&times;</button>
+            </div>
+            <form onsubmit="savePluginConfig(event)" class="space-y-4">
+                <input type="hidden" id="config-plugin-id">
+                <div>
+                    <label class="block text-xs font-bold text-slate-400 uppercase mb-1">Service Listening Port</label>
+                    <input type="number" id="config-plugin-port" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-white text-sm focus:border-cyan-500 focus:outline-none" placeholder="e.g., 8096">
+                </div>
+                <div id="config-extra-fields" class="space-y-3">
+                    <!-- Dynamic settings fields -->
+                </div>
+                <div class="flex justify-end gap-2 pt-2 border-t border-slate-800/80">
+                    <button type="button" onclick="hidePluginConfig()" class="bg-slate-800 hover:bg-slate-700 text-slate-300 px-4 py-2 rounded-xl text-sm font-semibold transition-all">Cancel</button>
+                    <button type="submit" class="bg-cyan-500 hover:bg-cyan-600 text-slate-950 font-bold px-5 py-2 rounded-xl text-sm transition-all">Save Changes</button>
+                </div>
+            </form>
         </div>
     </div>
 

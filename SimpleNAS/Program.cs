@@ -3,9 +3,32 @@ using System.Text.Json;
 using Microsoft.Extensions.FileProviders;
 using System.Security.Cryptography;
 using System.Text;
+using System.Runtime.InteropServices;
+using SimpleNAS;
 
 var builder = WebApplication.CreateBuilder(args);
-builder.WebHost.UseUrls("http://0.0.0.0:8000");
+builder.Services.AddHostedService<SnapshotSchedulerService>();
+var defaultUrl = Environment.GetEnvironmentVariable("ASPNETCORE_URLS") ?? "http://0.0.0.0:8000";
+builder.WebHost.UseUrls(defaultUrl);
+
+// Optional Kestrel HTTPS configuration if certificate is installed
+var sslConfig = SslManager.GetConfig();
+var pfxPath = Path.Combine(Directory.GetCurrentDirectory(), "simplenas_cert.pfx");
+if (sslConfig.Enabled && File.Exists(pfxPath))
+{
+    builder.WebHost.ConfigureKestrel(options =>
+    {
+        options.ListenAnyIP(8000);
+        try
+        {
+            options.ListenAnyIP(sslConfig.HttpsPort, listenOptions =>
+            {
+                listenOptions.UseHttps(pfxPath, sslConfig.PfxPassword);
+            });
+        }
+        catch { }
+    });
+}
 
 // Add session support for authentication
 builder.Services.AddDistributedMemoryCache();
@@ -34,9 +57,15 @@ var staticFileOptions = new StaticFileOptions
 app.UseDefaultFiles(); // Must come BEFORE UseStaticFiles()
 app.UseStaticFiles(staticFileOptions);
 
-// Simple auth middleware - check all /api requests except /api/auth/login
+// Simple auth middleware - check all /api requests except /api/auth/login, allow ACME challenge
 app.Use(async (context, next) =>
 {
+    if (context.Request.Path.StartsWithSegments("/.well-known"))
+    {
+        await next();
+        return;
+    }
+
     if (context.Request.Path.StartsWithSegments("/api") && 
         !context.Request.Path.StartsWithSegments("/api/auth/login"))
     {
@@ -46,6 +75,18 @@ app.Use(async (context, next) =>
             context.Response.StatusCode = 401;
             await context.Response.WriteAsJsonAsync(new { error = "Unauthorized" });
             return;
+        }
+
+        // Role-based authorization for Viewer role (prevent POST/DELETE on destructive endpoints)
+        var role = context.Session.GetString("role") ?? "Admin";
+        if (role == "Viewer" && (context.Request.Method == "POST" || context.Request.Method == "DELETE"))
+        {
+            if (!context.Request.Path.StartsWithSegments("/api/auth/logout"))
+            {
+                context.Response.StatusCode = 403;
+                await context.Response.WriteAsJsonAsync(new { error = "Forbidden: Viewer accounts have read-only access." });
+                return;
+            }
         }
     }
     await next();
@@ -66,19 +107,71 @@ string ResolveCommandPath(string command)
 
 string RunCommand(string command, params string[] args)
 {
-    var resolvedCommand = ResolveCommandPath(command);
-    var psi = new ProcessStartInfo
+    try
     {
-        FileName = resolvedCommand,
-        Arguments = string.Join(" ", args),
-        RedirectStandardOutput = true,
-        RedirectStandardError = true,
-        UseShellExecute = false
-    };
-    using var process = Process.Start(psi);
-    var output = process?.StandardOutput.ReadToEnd() ?? "";
-    process?.WaitForExit();
-    return output;
+        var resolvedCommand = ResolveCommandPath(command);
+        var psi = new ProcessStartInfo
+        {
+            FileName = resolvedCommand,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false
+        };
+        foreach (var arg in args)
+        {
+            if (!string.IsNullOrEmpty(arg))
+            {
+                psi.ArgumentList.Add(arg);
+            }
+        }
+        using var process = Process.Start(psi);
+        if (process == null) return "";
+        var stdoutTask = process.StandardOutput.ReadToEndAsync();
+        var stderrTask = process.StandardError.ReadToEndAsync();
+        process.WaitForExit();
+        return stdoutTask.GetAwaiter().GetResult();
+    }
+    catch
+    {
+        return "";
+    }
+}
+
+string RunCommandWithInput(string command, string input, params string[] args)
+{
+    try
+    {
+        var resolvedCommand = ResolveCommandPath(command);
+        var psi = new ProcessStartInfo
+        {
+            FileName = resolvedCommand,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false
+        };
+        foreach (var arg in args)
+        {
+            if (!string.IsNullOrEmpty(arg))
+            {
+                psi.ArgumentList.Add(arg);
+            }
+        }
+        using var process = Process.Start(psi);
+        if (process == null) return "";
+        using (var sw = process.StandardInput)
+        {
+            sw.Write(input);
+        }
+        var stdoutTask = process.StandardOutput.ReadToEndAsync();
+        var stderrTask = process.StandardError.ReadToEndAsync();
+        process.WaitForExit();
+        return stdoutTask.GetAwaiter().GetResult();
+    }
+    catch
+    {
+        return "";
+    }
 }
 
 string HashPassword(string password)
@@ -88,22 +181,98 @@ string HashPassword(string password)
     return Convert.ToBase64String(bytes);
 }
 
+string GetCredentialsFilePath()
+{
+    if (OperatingSystem.IsLinux()) return "/opt/simplenas/.credentials";
+    return Path.Combine(Directory.GetCurrentDirectory(), ".credentials");
+}
+
+(string Username, string PasswordHash) GetCurrentCredentials()
+{
+    string? username = Environment.GetEnvironmentVariable("SIMPLENAS_USER");
+    string? passwordHash = Environment.GetEnvironmentVariable("SIMPLENAS_PASS_HASH");
+
+    var credFile = GetCredentialsFilePath();
+    if (File.Exists(credFile))
+    {
+        try
+        {
+            var lines = File.ReadAllLines(credFile);
+            foreach (var line in lines)
+            {
+                var trimmed = line.Trim();
+                if (trimmed.StartsWith("USERNAME=")) username = trimmed["USERNAME=".Length..].Trim();
+                else if (trimmed.StartsWith("PASSWORD_HASH=")) passwordHash = trimmed["PASSWORD_HASH=".Length..].Trim();
+            }
+        }
+        catch { }
+    }
+
+    username ??= "admin";
+    passwordHash ??= "e4lr09VYxD+hyWssAw3XCpOg9Ybx9qAGpTWFet7BE2w="; // SimpleNAS2026
+
+    return (username, passwordHash);
+}
+
+string GetUsersJsonPath() => Path.Combine(Directory.GetCurrentDirectory(), "users.json");
+
+List<NasUserRecord> GetRegisteredUsers()
+{
+    var path = GetUsersJsonPath();
+    var list = new List<NasUserRecord>();
+    if (File.Exists(path))
+    {
+        try
+        {
+            var json = File.ReadAllText(path);
+            var users = JsonSerializer.Deserialize<List<NasUserRecord>>(json);
+            if (users != null) list = users;
+        }
+        catch { }
+    }
+    var creds = GetCurrentCredentials();
+    if (!list.Any(u => u.Username.Equals(creds.Username, StringComparison.OrdinalIgnoreCase)))
+    {
+        list.Insert(0, new NasUserRecord(creds.Username, creds.PasswordHash, "Admin"));
+    }
+    return list;
+}
+
+void SaveRegisteredUsers(List<NasUserRecord> users)
+{
+    var path = GetUsersJsonPath();
+    var json = JsonSerializer.Serialize(users, new JsonSerializerOptions { WriteIndented = true });
+    File.WriteAllText(path, json);
+}
+
+// ACME HTTP-01 challenge responder for Let's Encrypt
+app.MapGet("/.well-known/acme-challenge/{token}", (string token) =>
+{
+    if (SslManager.AcmeChallenges.TryGetValue(token, out var keyAuth))
+    {
+        return Results.Text(keyAuth, "text/plain");
+    }
+    return Results.NotFound();
+});
+
 // Authentication endpoint
 app.MapPost("/api/auth/login", async (HttpContext context) =>
 {
     var request = await context.Request.ReadFromJsonAsync<LoginRequest>();
     if (request == null) return Results.BadRequest(new { error = "Invalid request" });
     
-    // Default credentials: admin / SimpleNAS2026
-    var validUsername = Environment.GetEnvironmentVariable("SIMPLENAS_USER") ?? "admin";
-    var validPasswordHash = Environment.GetEnvironmentVariable("SIMPLENAS_PASS_HASH") ?? 
-        "e4lr09VYxD+hyWssAw3XCpOg9Ybx9qAGpTWFet7BE2w="; // SimpleNAS2026
-    
-    if (request.Username == validUsername && HashPassword(request.Password) == validPasswordHash)
+    var users = GetRegisteredUsers();
+    var hash = HashPassword(request.Password);
+    var matchedUser = users.FirstOrDefault(u => 
+        u.Username.Equals(request.Username, StringComparison.OrdinalIgnoreCase) && 
+        u.PasswordHash == hash);
+
+    if (matchedUser != null)
     {
         context.Session.SetString("authenticated", "true");
-        context.Session.SetString("username", request.Username);
-        return Results.Ok(new { success = true, username = request.Username });
+        context.Session.SetString("username", matchedUser.Username);
+        context.Session.SetString("role", matchedUser.Role);
+        return Results.Ok(new { success = true, username = matchedUser.Username, role = matchedUser.Role });
     }
     
     return Results.Unauthorized();
@@ -119,7 +288,8 @@ app.MapGet("/api/auth/status", (HttpContext context) =>
 {
     var authenticated = context.Session.GetString("authenticated") == "true";
     var username = context.Session.GetString("username");
-    return Results.Ok(new { authenticated, username });
+    var role = context.Session.GetString("role") ?? "Admin";
+    return Results.Ok(new { authenticated, username, role });
 });
 
 app.MapPost("/api/auth/change-password", async (HttpContext context) =>
@@ -128,27 +298,48 @@ app.MapPost("/api/auth/change-password", async (HttpContext context) =>
     if (authenticated != "true") return Results.Unauthorized();
     
     var request = await context.Request.ReadFromJsonAsync<ChangePasswordRequest>();
-    if (request == null) return Results.BadRequest(new { error = "Invalid request" });
+    if (request == null || string.IsNullOrWhiteSpace(request.CurrentPassword) || string.IsNullOrWhiteSpace(request.NewPassword))
+        return Results.BadRequest(new { error = "Current password and new password are required." });
     
-    var username = context.Session.GetString("username");
-    var validUsername = Environment.GetEnvironmentVariable("SIMPLENAS_USER") ?? "admin";
-    var currentHash = Environment.GetEnvironmentVariable("SIMPLENAS_PASS_HASH") ?? 
-        "e4lr09VYxD+hyWssAw3XCpOg9Ybx9qAGpTWFet7BE2w=";
+    var sessionUsername = context.Session.GetString("username") ?? "admin";
+    var users = GetRegisteredUsers();
+    var user = users.FirstOrDefault(u => u.Username.Equals(sessionUsername, StringComparison.OrdinalIgnoreCase));
     
-    // Verify current password
-    if (username != validUsername || HashPassword(request.CurrentPassword) != currentHash)
+    if (user == null)
     {
-        return Results.Json(new { error = "Current password is incorrect" }, statusCode: 400);
+        return Results.NotFound(new { error = "User account not found." });
+    }
+
+    // Verify current password hash
+    if (HashPassword(request.CurrentPassword) != user.PasswordHash)
+    {
+        return Results.Json(new { error = "Current password is incorrect." }, statusCode: 400);
     }
     
-    // Save new password hash to file (persistent storage)
     var newHash = HashPassword(request.NewPassword);
     try {
-        var credFile = "/opt/simplenas/.credentials";
-        File.WriteAllText(credFile, $"USERNAME={username}\nPASSWORD_HASH={newHash}\n");
-        RunCommand("chmod", "600", credFile);
+        // Update user record in users.json
+        users.RemoveAll(u => u.Username.Equals(sessionUsername, StringComparison.OrdinalIgnoreCase));
+        users.Add(user with { PasswordHash = newHash });
+        SaveRegisteredUsers(users);
+
+        // If admin or root credentials account, also update .credentials
+        var creds = GetCurrentCredentials();
+        if (sessionUsername.Equals("admin", StringComparison.OrdinalIgnoreCase) || sessionUsername.Equals(creds.Username, StringComparison.OrdinalIgnoreCase))
+        {
+            var credFile = GetCredentialsFilePath();
+            var dir = Path.GetDirectoryName(credFile);
+            if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir)) Directory.CreateDirectory(dir);
+            File.WriteAllText(credFile, $"USERNAME={sessionUsername}\nPASSWORD_HASH={newHash}\n");
+            if (OperatingSystem.IsLinux()) RunCommand("chmod", "600", credFile);
+        }
+
+        // On Linux, synchronize Samba password
+        if (OperatingSystem.IsLinux()) {
+            RunCommandWithInput("smbpasswd", $"{request.NewPassword}\n{request.NewPassword}\n", "-s", sessionUsername);
+        }
         
-        return Results.Ok(new { success = true, message = "Password changed. Restart SimpleNAS to apply changes." });
+        return Results.Ok(new { success = true, message = "Password changed successfully." });
     } catch (Exception ex) {
         return Results.Json(new { error = $"Failed to save password: {ex.Message}" }, statusCode: 500);
     }
@@ -156,40 +347,13 @@ app.MapPost("/api/auth/change-password", async (HttpContext context) =>
 
 app.MapGet("/api/disks", () =>
 {
-    var output = RunCommand("lsblk", "-J", "-o", "NAME,SIZE,TYPE,MOUNTPOINT,MODEL");
-    return Results.Json(JsonDocument.Parse(output).RootElement);
+    return Results.Json(SystemTelemetry.GetBlockDevices((cmd, args) => RunCommand(cmd, args)));
 });
 
 app.MapGet("/api/zfs/pools", () =>
 {
     try {
-        string output;
-        if (OperatingSystem.IsLinux()) {
-            output = RunCommand("zpool", "list", "-H");
-        } else {
-            var path = GetPoolsFilePath();
-            if (!File.Exists(path)) {
-                File.WriteAllText(path, "tank\t2.0T\t650G\t1.35T\t-\t0%\t32%\t1.00x\tONLINE\t-\n");
-            }
-            output = File.ReadAllText(path);
-        }
-
-        if (string.IsNullOrWhiteSpace(output))
-            return Results.Json(new { pools = Array.Empty<object>() });
-        
-        var pools = output.Split('\n', StringSplitOptions.RemoveEmptyEntries)
-            .Select(line => line.Split((char[])null, StringSplitOptions.RemoveEmptyEntries)) // Splits by any whitespace!
-            .Where(fields => fields.Length >= 10)
-            .Select(fields => new { 
-                name = fields[0],       // NAME
-                size = fields[1],       // SIZE
-                alloc = fields[2],      // ALLOC
-                allocated = fields[2],  // ALLOC (frontend expects 'allocated')
-                free = fields[3],       // FREE
-                capacity = fields.Length >= 8 ? fields[7] : fields[6],   // CAP is index 7, fallback to 6
-                health = fields[9]      // HEALTH
-            })
-            .ToList();
+        var pools = SystemTelemetry.GetStoragePools((cmd, args) => RunCommand(cmd, args), GetPoolsFilePath());
         return Results.Ok(new { pools });
     } catch {
         return Results.Json(new { pools = Array.Empty<object>() });
@@ -208,15 +372,16 @@ app.MapPost("/api/zfs/pools", async (HttpContext context) =>
         RunCommand("zpool", args.ToArray());
     } else {
         var path = GetPoolsFilePath();
-        var size = "2.0T"; // default mock size
+        var size = "3.6T";
         File.AppendAllText(path, $"{request.Name}\t{size}\t0B\t{size}\t-\t0%\t0%\t1.00x\tONLINE\t-\n");
 
-        // Automatically create a root dataset for the pool in datasets
         var dsPath = GetDatasetsFilePath();
-        if (!File.Exists(dsPath)) {
-            File.WriteAllText(dsPath, "tank\t650G\t1.35T\t/tank\ntank/media\t450G\t1.35T\t/tank/media\ntank/backups\t200G\t1.35T\t/tank/backups\n");
+        var mountpoint = OperatingSystem.IsWindows() ? $"D:\\{request.Name}" : $"/{request.Name}";
+        if (OperatingSystem.IsWindows())
+        {
+            try { if (!Directory.Exists(mountpoint)) Directory.CreateDirectory(mountpoint); } catch { }
         }
-        File.AppendAllText(dsPath, $"{request.Name}\t0B\t{size}\t/{request.Name}\n");
+        File.AppendAllText(dsPath, $"{request.Name}\t0B\t{size}\t{mountpoint}\n");
 
         // Remove used devices from mock devices
         var devPath = GetDevicesFilePath();
@@ -263,78 +428,19 @@ app.MapDelete("/api/zfs/pools/{name}", (string name) =>
 
 app.MapGet("/api/zfs/devices", () =>
 {
-    try {
-        string output;
-        if (OperatingSystem.IsLinux()) {
-            output = RunCommand("lsblk", "-d", "-n", "-o", "NAME,SIZE,TYPE");
-        } else {
-            var path = GetDevicesFilePath();
-            if (!File.Exists(path)) {
-                File.WriteAllText(path, "sdb\t2.0T\tdisk\nsdc\t2.0T\tdisk\nsdd\t2.0T\tdisk\n");
-            }
-            output = File.ReadAllText(path);
-        }
-
-        var devices = output.Split('\n', StringSplitOptions.RemoveEmptyEntries)
-            .Select(line => line.Split('\t', StringSplitOptions.RemoveEmptyEntries))
-            .Where(fields => fields.Length >= 3 && fields[2].Trim() == "disk")
-            .Select(fields => new { name = "/dev/" + fields[0].Trim(), size = fields[1].Trim() })
-            .ToList();
-        return Results.Ok(new { devices });
-    } catch {
-        return Results.Ok(new { devices = Array.Empty<object>() });
-    }
+    var devices = SystemTelemetry.GetRawDevices((cmd, args) => RunCommand(cmd, args), GetDevicesFilePath());
+    return Results.Ok(new { devices });
 });
 
 app.MapGet("/api/system/status", () =>
 {
-    if (!OperatingSystem.IsLinux())
-    {
-        return Results.Json(new {
-            cpu = new { percent = 14.2 },
-            memory = new { percent = 38.6 },
-            disk = new { percent = "28%" }
-        });
-    }
-
-    var dfOutput = RunCommand("df", "-h", "/");
-    var lines = dfOutput.Split('\n', StringSplitOptions.RemoveEmptyEntries);
-    var diskPercent = "0%";
-    if (lines.Length >= 2) {
-        var fields = lines[1].Split((char[])null, StringSplitOptions.RemoveEmptyEntries);
-        if (fields.Length >= 5) diskPercent = fields[4];
-    }
-    
-    double cpuPercent = 0.0;
-    try {
-        var mpstat = RunCommand("top", "-b", "-n", "1");
-        var mpLines = mpstat.Split('\n', StringSplitOptions.RemoveEmptyEntries);
-        var cpuLine = mpLines.FirstOrDefault(l => l.Contains("%Cpu(s)") || l.Contains("CPU:"));
-        if (cpuLine != null) {
-            var idleIndex = cpuLine.IndexOf("id");
-            if (idleIndex > 0) {
-                var beforeIdle = cpuLine.Substring(0, idleIndex).Trim().Split(',').Last().Trim();
-                var idleFields = beforeIdle.Split((char[])null, StringSplitOptions.RemoveEmptyEntries);
-                if (idleFields.Length > 0 && double.TryParse(idleFields.Last().Replace("%", "").Replace("id", "").Trim(), out double idle)) {
-                    cpuPercent = 100.0 - idle;
-                }
-            }
-        }
-    } catch { }
-
-    double memPercent = 0.0;
-    try {
-        var freeOutput = RunCommand("free", "-m");
-        var memLines = freeOutput.Split('\n', StringSplitOptions.RemoveEmptyEntries);
-        if (memLines.Length >= 2) {
-            var memFields = memLines[1].Split((char[])null, StringSplitOptions.RemoveEmptyEntries);
-            if (memFields.Length >= 3 && double.TryParse(memFields[1], out double total) && double.TryParse(memFields[2], out double used)) {
-                memPercent = (used / total) * 100.0;
-            }
-        }
-    } catch { }
+    var cpuPercent = SystemTelemetry.GetCpuPercent();
+    var memPercent = SystemTelemetry.GetMemoryPercent();
+    var diskPercent = SystemTelemetry.GetDiskPercent();
 
     return Results.Json(new {
+        platform = OperatingSystem.IsWindows() ? "windows" : (OperatingSystem.IsLinux() ? "linux" : "unknown"),
+        osDescription = RuntimeInformation.OSDescription,
         cpu = new { percent = cpuPercent },
         memory = new { percent = memPercent },
         disk = new { percent = diskPercent }
@@ -343,18 +449,7 @@ app.MapGet("/api/system/status", () =>
 
 app.MapGet("/api/system/services", () =>
 {
-    var services = new[] { "smbd", "nmbd", "ssh", "tailscaled" };
-    var status = services.ToDictionary(
-        s => s,
-        s => {
-            try {
-                var isActive = RunCommand("systemctl", "is-active", s).Trim();
-                return isActive == "active" ? "active" : "inactive";
-            } catch {
-                return "inactive";
-            }
-        }
-    );
+    var status = SystemTelemetry.GetServicesStatus((cmd, args) => RunCommand(cmd, args));
     return Results.Ok(new { services = status });
 });
 
@@ -379,24 +474,14 @@ app.MapGet("/api/network/interfaces", () =>
 
 app.MapGet("/api/network/tailscale/status", () =>
 {
-    try {
-        var tailscalePath = RunCommand("which", "tailscale").Trim();
-        var installed = !string.IsNullOrEmpty(tailscalePath);
-        var running = false;
-        if (installed) {
-            var isActive = RunCommand("systemctl", "is-active", "tailscaled").Trim();
-            running = isActive == "active";
-        }
-        return Results.Ok(new { installed, running });
-    } catch {
-        return Results.Ok(new { installed = false, running = false });
-    }
+    var (installed, running) = SystemTelemetry.GetTailscaleStatus((cmd, args) => RunCommand(cmd, args));
+    return Results.Ok(new { installed, running });
 });
 
 app.MapPost("/api/network/tailscale/up", () =>
 {
     try {
-        RunCommand("systemctl", "start", "tailscaled");
+        SystemTelemetry.SetTailscale(true, (cmd, args) => RunCommand(cmd, args));
         return Results.Ok(new { success = true });
     } catch (Exception ex) {
         return Results.Problem(ex.Message);
@@ -406,7 +491,7 @@ app.MapPost("/api/network/tailscale/up", () =>
 app.MapPost("/api/network/tailscale/down", () =>
 {
     try {
-        RunCommand("systemctl", "stop", "tailscaled");
+        SystemTelemetry.SetTailscale(false, (cmd, args) => RunCommand(cmd, args));
         return Results.Ok(new { success = true });
     } catch (Exception ex) {
         return Results.Problem(ex.Message);
@@ -416,7 +501,7 @@ app.MapPost("/api/network/tailscale/down", () =>
 // SMB Shares Endpoints
 app.MapGet("/api/shares/smb", () =>
 {
-    var shares = ParseSmbConf(GetSmbConfPath());
+    var shares = SystemTelemetry.GetSmbShares((cmd, args) => RunCommand(cmd, args), GetSmbConfPath(), ParseSmbConf);
     return Results.Ok(new { shares });
 });
 
@@ -427,6 +512,9 @@ app.MapPost("/api/shares/smb", async (HttpContext context) =>
         return Results.BadRequest(new { error = "Invalid request parameters" });
 
     try {
+        if (OperatingSystem.IsWindows()) {
+            SystemTelemetry.AddShare(request.Name, request.Path, request.ReadOnly, (cmd, args) => RunCommand(cmd, args));
+        }
         AddSmbShare(GetSmbConfPath(), request);
         if (OperatingSystem.IsLinux()) {
             RunCommand("systemctl", "reload", "smbd");
@@ -443,6 +531,9 @@ app.MapDelete("/api/shares/smb/{name}", (string name) =>
         return Results.BadRequest(new { error = "Invalid share name" });
 
     try {
+        if (OperatingSystem.IsWindows()) {
+            SystemTelemetry.DeleteShare(name, (cmd, args) => RunCommand(cmd, args));
+        }
         DeleteSmbShare(GetSmbConfPath(), name);
         if (OperatingSystem.IsLinux()) {
             RunCommand("systemctl", "reload", "smbd");
@@ -508,43 +599,18 @@ app.MapPost("/api/system/services/control", async (HttpContext context) =>
         return Results.BadRequest(new { error = "Unauthorized service or action" });
 
     try {
-        if (OperatingSystem.IsLinux()) {
-            RunCommand("systemctl", request.Action, request.Service);
-        }
+        SystemTelemetry.ControlService(request.Service, request.Action, (cmd, args) => RunCommand(cmd, args));
         return Results.Ok(new { success = true });
     } catch (Exception ex) {
         return Results.Problem(ex.Message);
     }
 });
 
-// ZFS datasets API
+// Storage datasets API
 app.MapGet("/api/zfs/datasets", () =>
 {
     try {
-        string output;
-        if (OperatingSystem.IsLinux()) {
-            output = RunCommand("zfs", "list", "-H");
-        } else {
-            var path = GetDatasetsFilePath();
-            if (!File.Exists(path)) {
-                File.WriteAllText(path, "tank\t650G\t1.35T\t/tank\ntank/media\t450G\t1.35T\t/tank/media\ntank/backups\t200G\t1.35T\t/tank/backups\n");
-            }
-            output = File.ReadAllText(path);
-        }
-
-        if (string.IsNullOrWhiteSpace(output))
-            return Results.Ok(new { datasets = Array.Empty<object>() });
-
-        var datasets = output.Split('\n', StringSplitOptions.RemoveEmptyEntries)
-            .Select(line => line.Split((char[])null, StringSplitOptions.RemoveEmptyEntries)) // Splits by any whitespace!
-            .Where(fields => fields.Length >= 4)
-            .Select(fields => new {
-                name = fields[0],      // NAME
-                used = fields[1],      // USED
-                avail = fields[2],     // AVAIL
-                mountpoint = fields.Length >= 5 ? fields[4] : fields[3] // MOUNTPOINT (index 4 in 5-column whitespace split)
-            })
-            .ToList();
+        var datasets = SystemTelemetry.GetStorageDatasets((cmd, args) => RunCommand(cmd, args), GetDatasetsFilePath());
         return Results.Ok(new { datasets });
     } catch {
         return Results.Ok(new { datasets = Array.Empty<object>() });
@@ -562,8 +628,27 @@ app.MapPost("/api/zfs/datasets", async (HttpContext context) =>
         RunCommand("zfs", "create", fullName);
     } else {
         var path = GetDatasetsFilePath();
-        var mountpoint = $"/{fullName}";
-        File.AppendAllText(path, $"{fullName}\t0B\t1.35T\t{mountpoint}\n");
+        string mountpoint;
+        if (OperatingSystem.IsWindows())
+        {
+            var letter = "D";
+            if (request.Pool.Contains('_'))
+            {
+                var candidate = request.Pool.Split('_').Last();
+                if (candidate.Length == 1 && char.IsLetter(candidate[0])) letter = candidate.ToUpperInvariant();
+            }
+            mountpoint = $"{letter}:\\{request.Name}";
+            try
+            {
+                if (!Directory.Exists(mountpoint)) Directory.CreateDirectory(mountpoint);
+            }
+            catch { }
+        }
+        else
+        {
+            mountpoint = $"/{fullName}";
+        }
+        File.AppendAllText(path, $"{fullName}\t0B\t3.6T\t{mountpoint}\n");
     }
     return Results.Ok(new { success = true });
 });
@@ -621,7 +706,7 @@ app.MapGet("/api/zfs/snapshots", () =>
             return Results.Ok(new { snapshots = Array.Empty<object>() });
 
         var snapshots = output.Split('\n', StringSplitOptions.RemoveEmptyEntries)
-            .Select(line => line.Split((char[])null, StringSplitOptions.RemoveEmptyEntries)) // Splits by any whitespace!
+            .Select(line => line.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)) // Splits by any whitespace!
             .Where(fields => fields.Length >= 4)
             .Select(fields => new {
                 name = fields[0],      // NAME
@@ -701,13 +786,8 @@ app.MapPost("/api/zfs/pools/scrub", async (HttpContext context) =>
 // Firewall status API
 app.MapGet("/api/network/firewall", () =>
 {
-    try {
-        var output = RunCommand("ufw", "status").Trim();
-        var active = output.Contains("Status: active");
-        return Results.Ok(new { active });
-    } catch {
-        return Results.Ok(new { active = false });
-    }
+    var active = SystemTelemetry.GetFirewallActive((cmd, args) => RunCommand(cmd, args));
+    return Results.Ok(new { active });
 });
 
 // Firewall toggle API
@@ -717,13 +797,7 @@ app.MapPost("/api/network/firewall/toggle", async (HttpContext context) =>
     if (request == null) return Results.BadRequest();
 
     try {
-        if (OperatingSystem.IsLinux()) {
-            if (request.Enable) {
-                RunCommand("bash", "-c", "echo 'y' | ufw enable");
-            } else {
-                RunCommand("ufw", "disable");
-            }
-        }
+        SystemTelemetry.SetFirewallActive(request.Enable, (cmd, args) => RunCommand(cmd, args));
         return Results.Ok(new { success = true });
     } catch (Exception ex) {
         return Results.Problem(ex.Message);
@@ -750,16 +824,14 @@ app.MapPost("/api/network/firewall/whitelist", async (HttpContext context) =>
 
     try {
         if (OperatingSystem.IsLinux()) {
-            var port = request.Port;
-            var comment = !string.IsNullOrWhiteSpace(request.Comment) ? $"comment '{request.Comment}'" : "";
-            
-            if (port > 0) {
-                // Allow specific port
-                RunCommand("ufw", "allow", "from", request.Ip, "to", "any", "port", port.ToString(), "proto", "tcp", comment);
-            } else {
-                // Allow all ports
-                RunCommand("ufw", "allow", "from", request.Ip, comment);
+            var args = new List<string> { "allow", "from", request.Ip };
+            if (request.Port > 0) {
+                args.AddRange(["to", "any", "port", request.Port.ToString(), "proto", "tcp"]);
             }
+            if (!string.IsNullOrWhiteSpace(request.Comment)) {
+                args.AddRange(["comment", request.Comment]);
+            }
+            RunCommand("ufw", args.ToArray());
         }
         return Results.Ok(new { success = true });
     } catch (Exception ex) {
@@ -767,29 +839,11 @@ app.MapPost("/api/network/firewall/whitelist", async (HttpContext context) =>
     }
 });
 
-// User Management APIs
+// User Management APIs with Role-Based Access Control (RBAC)
 app.MapGet("/api/users", () =>
 {
-    try {
-        if (OperatingSystem.IsLinux()) {
-            var output = RunCommand("pdbedit", "-L");
-            var users = output.Split('\n', StringSplitOptions.RemoveEmptyEntries)
-                .Select(line => {
-                    var parts = line.Split(':');
-                    return new { username = parts[0].Trim() };
-                })
-                .ToList();
-            return Results.Ok(new { users });
-        } else {
-            var path = GetUsersFilePath();
-            var users = File.Exists(path) ? 
-                File.ReadAllLines(path).Select(u => (object)new { username = u.Trim() }).ToList() : 
-                new List<object> { new { username = "ubuntu" } };
-            return Results.Ok(new { users });
-        }
-    } catch {
-        return Results.Ok(new { users = Array.Empty<object>() });
-    }
+    var users = GetRegisteredUsers().Select(u => new { username = u.Username, role = u.Role }).ToList();
+    return Results.Ok(new { users });
 });
 
 app.MapPost("/api/users", async (HttpContext context) =>
@@ -798,13 +852,21 @@ app.MapPost("/api/users", async (HttpContext context) =>
     if (request == null || string.IsNullOrWhiteSpace(request.Username) || string.IsNullOrWhiteSpace(request.Password))
         return Results.BadRequest(new { error = "Invalid user parameters" });
 
+    var role = string.IsNullOrWhiteSpace(request.Role) ? "Operator" : request.Role;
+    if (role != "Admin" && role != "Operator" && role != "Viewer") role = "Operator";
+
     try {
+        var users = GetRegisteredUsers();
+        if (users.Any(u => u.Username.Equals(request.Username, StringComparison.OrdinalIgnoreCase)))
+            return Results.BadRequest(new { error = "User already exists" });
+
+        var hash = HashPassword(request.Password);
+        users.Add(new NasUserRecord(request.Username, hash, role));
+        SaveRegisteredUsers(users);
+
         if (OperatingSystem.IsLinux()) {
-            // 1. Create system user (no nologin shell, no home directory)
             RunCommand("useradd", "-M", "-s", "/sbin/nologin", request.Username);
-            // 2. Set Samba password
-            var smbCmd = $"echo -e \"{request.Password}\\n{request.Password}\" | smbpasswd -a -s {request.Username}";
-            RunCommand("bash", "-c", smbCmd);
+            RunCommandWithInput("smbpasswd", $"{request.Password}\n{request.Password}\n", "-a", "-s", request.Username);
         } else {
             var path = GetUsersFilePath();
             File.AppendAllText(path, $"{request.Username}\n");
@@ -818,8 +880,14 @@ app.MapPost("/api/users", async (HttpContext context) =>
 app.MapDelete("/api/users/{username}", (string username) =>
 {
     if (string.IsNullOrWhiteSpace(username)) return Results.BadRequest();
+    if (username.Equals("admin", StringComparison.OrdinalIgnoreCase))
+        return Results.BadRequest(new { error = "Root administrator account cannot be deleted." });
 
     try {
+        var users = GetRegisteredUsers();
+        users.RemoveAll(u => u.Username.Equals(username, StringComparison.OrdinalIgnoreCase));
+        SaveRegisteredUsers(users);
+
         if (OperatingSystem.IsLinux()) {
             RunCommand("smbpasswd", "-x", username);
             RunCommand("userdel", username);
@@ -834,6 +902,123 @@ app.MapDelete("/api/users/{username}", (string username) =>
     } catch (Exception ex) {
         return Results.Problem(ex.Message);
     }
+});
+
+app.MapPost("/api/users/{username}/password", async (HttpContext context, string username) =>
+{
+    var currentRole = context.Session.GetString("role") ?? "Viewer";
+    if (currentRole != "Admin")
+    {
+        context.Response.StatusCode = 403;
+        return Results.Json(new { error = "Forbidden: Administrator role required to reset user passwords." }, statusCode: 403);
+    }
+
+    if (string.IsNullOrWhiteSpace(username)) return Results.BadRequest();
+    var req = await context.Request.ReadFromJsonAsync<AdminResetPasswordRequest>();
+    if (req == null || string.IsNullOrWhiteSpace(req.NewPassword))
+        return Results.BadRequest(new { error = "New password cannot be empty." });
+
+    try {
+        var users = GetRegisteredUsers();
+        var user = users.FirstOrDefault(u => u.Username.Equals(username, StringComparison.OrdinalIgnoreCase));
+        if (user == null)
+            return Results.NotFound(new { error = $"User '{username}' not found." });
+
+        var newHash = HashPassword(req.NewPassword);
+        users.RemoveAll(u => u.Username.Equals(username, StringComparison.OrdinalIgnoreCase));
+        users.Add(user with { PasswordHash = newHash });
+        SaveRegisteredUsers(users);
+
+        if (username.Equals("admin", StringComparison.OrdinalIgnoreCase))
+        {
+            var credFile = GetCredentialsFilePath();
+            var dir = Path.GetDirectoryName(credFile);
+            if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir)) Directory.CreateDirectory(dir);
+            File.WriteAllText(credFile, $"USERNAME={username}\nPASSWORD_HASH={newHash}\n");
+            if (OperatingSystem.IsLinux()) RunCommand("chmod", "600", credFile);
+        }
+
+        if (OperatingSystem.IsLinux()) {
+            RunCommandWithInput("smbpasswd", $"{req.NewPassword}\n{req.NewPassword}\n", "-s", username);
+        }
+
+        return Results.Ok(new { success = true, message = $"Password for '{username}' updated successfully." });
+    } catch (Exception ex) {
+        return Results.Problem(ex.Message);
+    }
+});
+
+// SSL & Let's Encrypt APIs
+app.MapGet("/api/ssl/status", () => Results.Ok(SslManager.GetStatus()));
+
+app.MapPost("/api/ssl/self-signed", (SelfSignedRequest req) =>
+{
+    var domain = string.IsNullOrWhiteSpace(req?.Domain) ? "localhost" : req.Domain.Trim();
+    var (success, message) = SslManager.GenerateSelfSignedCertificate(domain);
+    if (!success) return Results.BadRequest(new { error = message });
+    return Results.Ok(new { success = true, message });
+});
+
+app.MapPost("/api/ssl/letsencrypt/request", async (LetsEncryptRequest req) =>
+{
+    if (req == null || string.IsNullOrWhiteSpace(req.Domain) || string.IsNullOrWhiteSpace(req.Email))
+        return Results.BadRequest(new { error = "Domain and email are required." });
+
+    var (success, message) = await SslManager.RequestLetsEncryptCertificate(req.Domain, req.Email, req.Staging);
+    if (!success) return Results.BadRequest(new { error = message });
+    return Results.Ok(new { success = true, message });
+});
+
+// Automated Snapshot Scheduling APIs
+app.MapGet("/api/snapshots/schedule", () => Results.Ok(SnapshotSchedulerService.GetSchedule()));
+
+app.MapPost("/api/snapshots/schedule", (SnapshotSchedule schedule) =>
+{
+    if (schedule == null) return Results.BadRequest();
+    SnapshotSchedulerService.SaveSchedule(schedule);
+    return Results.Ok(new { success = true });
+});
+
+app.MapPost("/api/snapshots/schedule/run", async () =>
+{
+    var schedule = SnapshotSchedulerService.GetSchedule();
+    await SnapshotSchedulerService.RunSnapshotTaskAsync(schedule);
+    return Results.Ok(new { success = true });
+});
+
+// Plugin & Extension Center APIs
+app.MapGet("/api/plugins", () =>
+{
+    var plugins = PluginManager.GetAllPlugins();
+    return Results.Ok(new { plugins });
+});
+
+app.MapPost("/api/plugins/install", (PluginInstallRequest req) =>
+{
+    if (string.IsNullOrWhiteSpace(req.Id)) return Results.BadRequest(new { error = "Plugin ID required." });
+    var (success, message) = PluginManager.InstallPlugin(req.Id);
+    return success ? Results.Ok(new { success = true, message }) : Results.BadRequest(new { error = message });
+});
+
+app.MapPost("/api/plugins/uninstall", (PluginInstallRequest req) =>
+{
+    if (string.IsNullOrWhiteSpace(req.Id)) return Results.BadRequest(new { error = "Plugin ID required." });
+    var (success, message) = PluginManager.UninstallPlugin(req.Id);
+    return success ? Results.Ok(new { success = true, message }) : Results.BadRequest(new { error = message });
+});
+
+app.MapPost("/api/plugins/toggle", (PluginToggleRequest req) =>
+{
+    if (string.IsNullOrWhiteSpace(req.Id)) return Results.BadRequest(new { error = "Plugin ID required." });
+    var (success, message) = PluginManager.TogglePlugin(req.Id, req.Enabled);
+    return success ? Results.Ok(new { success = true, message }) : Results.BadRequest(new { error = message });
+});
+
+app.MapPost("/api/plugins/config", (PluginConfigRequest req) =>
+{
+    if (string.IsNullOrWhiteSpace(req.Id)) return Results.BadRequest(new { error = "Plugin ID required." });
+    var (success, message) = PluginManager.UpdateSettings(req.Id, req.Port, req.Settings ?? new());
+    return success ? Results.Ok(new { success = true, message }) : Results.BadRequest(new { error = message });
 });
 
 // ZFS Pool Import APIs
@@ -938,6 +1123,109 @@ if (!string.IsNullOrWhiteSpace(webhookUrl))
         }
     });
 }
+// Cloud Storage Manager
+bool isSyncActive = false;
+
+app.MapGet("/api/cloud/status", () =>
+{
+    if (!OperatingSystem.IsLinux())
+    {
+        return Results.Json(new {
+            rcloneMounted = false,
+            rclonePath = "/mnt/gdrive",
+            mergerfsMounted = false,
+            mergerfsPath = "/mnt/tank/unified",
+            syncActive = isSyncActive
+        });
+    }
+
+    var mountOutput = RunCommand("mount");
+    bool rcloneMounted = mountOutput.Contains("/mnt/gdrive");
+    bool mergerfsMounted = mountOutput.Contains("/mnt/tank/unified");
+    
+    return Results.Json(new {
+        rcloneMounted = rcloneMounted,
+        rclonePath = "/mnt/gdrive",
+        mergerfsMounted = mergerfsMounted,
+        mergerfsPath = "/mnt/tank/unified",
+        syncActive = isSyncActive
+    });
+});
+
+app.MapPost("/api/cloud/mount", () =>
+{
+    try {
+        if (OperatingSystem.IsLinux()) {
+            if (!Directory.Exists("/mnt/gdrive")) Directory.CreateDirectory("/mnt/gdrive");
+            
+            Task.Run(() => {
+                RunCommand("rclone", "mount", "gdrive:", "/mnt/gdrive", "--vfs-cache-mode", "writes", "--allow-other", "--daemon");
+            });
+        }
+        return Results.Ok(new { success = true });
+    } catch (Exception ex) {
+        return Results.Json(new { error = ex.Message }, statusCode: 500);
+    }
+});
+
+app.MapPost("/api/cloud/unmount", () =>
+{
+    try {
+        if (OperatingSystem.IsLinux()) {
+            RunCommand("fusermount", "-u", "/mnt/gdrive");
+        }
+        return Results.Ok(new { success = true });
+    } catch (Exception ex) {
+        return Results.Json(new { error = ex.Message }, statusCode: 500);
+    }
+});
+
+app.MapPost("/api/cloud/union", () =>
+{
+    try {
+        if (OperatingSystem.IsLinux()) {
+            if (!Directory.Exists("/mnt/tank/unified")) Directory.CreateDirectory("/mnt/tank/unified");
+            
+            Task.Run(() => {
+                RunCommand("mergerfs", "-o", "defaults,allow_other,use_ino,category.create=ff", "/mnt/tank/local:/mnt/gdrive", "/mnt/tank/unified");
+            });
+        }
+        return Results.Ok(new { success = true });
+    } catch (Exception ex) {
+        return Results.Json(new { error = ex.Message }, statusCode: 500);
+    }
+});
+
+app.MapPost("/api/cloud/unmount-union", () =>
+{
+    try {
+        if (OperatingSystem.IsLinux()) {
+            RunCommand("fusermount", "-u", "/mnt/tank/unified");
+        }
+        return Results.Ok(new { success = true });
+    } catch (Exception ex) {
+        return Results.Json(new { error = ex.Message }, statusCode: 500);
+    }
+});
+
+app.MapPost("/api/cloud/sync", () =>
+{
+    if (isSyncActive) return Results.Conflict(new { error = "Sync task is already running." });
+    
+    isSyncActive = true;
+    Task.Run(async () => {
+        try {
+            if (OperatingSystem.IsLinux()) {
+                RunCommand("rclone", "move", "/mnt/tank/local/Backups", "gdrive:Backups", "--min-age", "30d");
+            } else {
+                await Task.Delay(2000); // Simulate background sync in dev
+            }
+        } finally {
+            isSyncActive = false;
+        }
+    });
+    return Results.Ok(new { success = true });
+});
 
 Console.WriteLine("SimpleNAS running on http://0.0.0.0:8000");
 Console.WriteLine("Default login: admin / SimpleNAS2026");
@@ -1073,7 +1361,7 @@ List<NfsExport> ParseNfsExports(string filePath)
         if (string.IsNullOrEmpty(line) || line.StartsWith("#"))
             continue;
             
-        var parts = line.Split((char[])null, StringSplitOptions.RemoveEmptyEntries);
+        var parts = line.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
         if (parts.Length >= 1)
         {
             var path = parts[0];
@@ -1098,7 +1386,7 @@ void DeleteNfsExport(string filePath, string path)
     var newLines = lines.Where(rawLine => {
         var line = rawLine.Trim();
         if (string.IsNullOrEmpty(line) || line.StartsWith("#")) return true;
-        var parts = line.Split((char[])null, StringSplitOptions.RemoveEmptyEntries);
+        var parts = line.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
         if (parts.Length >= 1 && parts[0].TrimEnd('/') == path.TrimEnd('/')) return false;
         return true;
     }).ToList();
@@ -1106,101 +1394,27 @@ void DeleteNfsExport(string filePath, string path)
     File.WriteAllLines(filePath, newLines);
 }
 
-// Cloud Storage Manager
-bool isSyncActive = false;
-
-app.MapGet("/api/cloud/status", () =>
-{
-    var mountOutput = RunCommand("mount");
-    bool rcloneMounted = mountOutput.Contains("/mnt/gdrive");
-    bool mergerfsMounted = mountOutput.Contains("/mnt/tank/unified");
-    
-    return Results.Json(new {
-        rcloneMounted = rcloneMounted,
-        rclonePath = "/mnt/gdrive",
-        mergerfsMounted = mergerfsMounted,
-        mergerfsPath = "/mnt/tank/unified",
-        syncActive = isSyncActive
-    });
-});
-
-app.MapPost("/api/cloud/mount", () =>
-{
-    try {
-        if (!Directory.Exists("/mnt/gdrive")) Directory.CreateDirectory("/mnt/gdrive");
-        
-        Task.Run(() => {
-            RunCommand("rclone", "mount", "gdrive:", "/mnt/gdrive", "--vfs-cache-mode", "writes", "--allow-other", "--daemon");
-        });
-        return Results.Ok(new { success = true });
-    } catch (Exception ex) {
-        return Results.Json(new { error = ex.Message }, statusCode: 500);
-    }
-});
-
-app.MapPost("/api/cloud/unmount", () =>
-{
-    try {
-        RunCommand("fusermount", "-u", "/mnt/gdrive");
-        return Results.Ok(new { success = true });
-    } catch (Exception ex) {
-        return Results.Json(new { error = ex.Message }, statusCode: 500);
-    }
-});
-
-app.MapPost("/api/cloud/union", () =>
-{
-    try {
-        if (!Directory.Exists("/mnt/tank/unified")) Directory.CreateDirectory("/mnt/tank/unified");
-        
-        Task.Run(() => {
-            RunCommand("mergerfs", "-o", "defaults,allow_other,use_ino,category.create=ff", "/mnt/tank/local:/mnt/gdrive", "/mnt/tank/unified");
-        });
-        return Results.Ok(new { success = true });
-    } catch (Exception ex) {
-        return Results.Json(new { error = ex.Message }, statusCode: 500);
-    }
-});
-
-app.MapPost("/api/cloud/unmount-union", () =>
-{
-    try {
-        RunCommand("fusermount", "-u", "/mnt/tank/unified");
-        return Results.Ok(new { success = true });
-    } catch (Exception ex) {
-        return Results.Json(new { error = ex.Message }, statusCode: 500);
-    }
-});
-
-app.MapPost("/api/cloud/sync", () =>
-{
-    if (isSyncActive) return Results.Conflict(new { error = "Sync task is already running." });
-    
-    isSyncActive = true;
-    Task.Run(() => {
-        try {
-            RunCommand("rclone", "move", "/mnt/tank/local/Backups", "gdrive:Backups", "--min-age", "30d");
-        } finally {
-            isSyncActive = false;
-        }
-    });
-    return Results.Ok(new { success = true });
-});
-
 record ZfsPoolRequest(string Name, string VdevType, string[] Devices);
 record LoginRequest(string Username, string Password);
 record ChangePasswordRequest(string CurrentPassword, string NewPassword);
 record CreateSmbShareRequest(string Name, string Path, bool ReadOnly, bool GuestOk);
 record CreateNfsExportRequest(string Path, List<string> Clients, string Options);
 record DeleteNfsExportRequest(string Path);
-record SmbShare(string Name, Dictionary<string, string> Config);
 record NfsExport(string Path, List<string> Clients);
 record ServiceControlRequest(string Service, string Action);
 record FirewallToggleRequest(bool Enable);
 record WhitelistRequest(string Ip, int Port, string Comment);
-record CreateUserRequest(string Username, string Password);
+record CreateUserRequest(string Username, string Password, string? Role);
+record NasUserRecord(string Username, string PasswordHash, string Role);
+record SelfSignedRequest(string? Domain);
+record LetsEncryptRequest(string Domain, string Email, bool Staging);
 record ImportPoolRequest(string Name);
 record CreateDatasetRequest(string Pool, string Name);
 record CreateSnapshotRequest(string Dataset, string Name);
 record RollbackSnapshotRequest(string Snapshot);
 record ScrubPoolRequest(string Pool);
+record PluginInstallRequest(string Id);
+record PluginToggleRequest(string Id, bool Enabled);
+record PluginConfigRequest(string Id, int? Port, Dictionary<string, string>? Settings);
+record AdminResetPasswordRequest(string NewPassword);
+

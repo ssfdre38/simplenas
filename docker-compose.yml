@@ -1,0 +1,20 @@
+services:
+  simplenas:
+    image: ssfdre38/simplenas:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: simplenas
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+      - "8443:8443"
+    environment:
+      - ASPNETCORE_URLS=http://0.0.0.0:8000
+      - ASPNETCORE_ENVIRONMENT=Production
+    volumes:
+      - ./data:/app/data
+      - /etc/samba:/etc/samba:ro
+    privileged: true
+    cap_add:
+      - SYS_ADMIN

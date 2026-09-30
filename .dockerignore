@@ -1,0 +1,11 @@
+**/.git
+**/.vs
+**/.vscode
+**/bin
+**/obj
+**/publish
+**/publish-*
+**/*.user
+**/*.suo
+**/*.log
+**/*.tmp

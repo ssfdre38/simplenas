@@ -74,3 +74,17 @@ artifacts/
 *.log
 *.tmp
 appsettings.Production.json
+.credentials
+mock_*.txt
+users.txt
+smb.conf
+exports
+*.pfx
+*.key
+*.crt
+users.json
+ssl_config.json
+snapshot_schedule.json
+plugins.json
+plugins/
+

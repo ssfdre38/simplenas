@@ -19,6 +19,7 @@ function showTab(tabName) {
             loadZfsDatasets();
             loadZfsSnapshots();
             loadZfsDevices();
+            loadSnapshotSchedule();
             break;
         case 'shares':
             loadShares();
@@ -29,9 +30,13 @@ function showTab(tabName) {
         case 'network':
             loadNetwork();
             loadFirewallStatus();
+            loadSslStatus();
             break;
         case 'users':
             loadUsers();
+            break;
+        case 'plugins':
+            loadPlugins();
             break;
     }
 }
@@ -50,6 +55,24 @@ async function loadDashboard() {
     try {
         const response = await fetch(`${API_BASE}/system/status`);
         const data = await response.json();
+        
+        window.nasPlatform = data.platform || 'linux';
+        if (window.nasPlatform === 'windows') {
+            const storageTitle = document.getElementById('storage-center-title');
+            if (storageTitle) storageTitle.textContent = 'Windows Storage Center';
+            const storageDesc = document.getElementById('storage-center-desc');
+            if (storageDesc) storageDesc.textContent = 'Manage Windows storage volumes, drives, and directory datasets';
+            const poolsHeading = document.getElementById('storage-pools-heading');
+            if (poolsHeading) poolsHeading.textContent = 'Windows Storage Pools & Volumes';
+            const dsHeading = document.getElementById('storage-datasets-heading');
+            if (dsHeading) dsHeading.textContent = 'Directory Datasets & Mounts';
+            const snapHeading = document.getElementById('storage-snapshots-heading');
+            if (snapHeading) snapHeading.textContent = 'Storage Snapshots';
+            const navLabel = document.getElementById('nav-storage-label');
+            if (navLabel) navLabel.textContent = 'Storage & Drives';
+            const sharesHeading = document.getElementById('shares-smb-heading');
+            if (sharesHeading) sharesHeading.textContent = 'Windows SMB File Sharing';
+        }
         
         document.getElementById('cpu-usage').textContent = `${data.cpu.percent.toFixed(0)}%`;
         setProgress('cpu', data.cpu.percent);
@@ -152,6 +175,12 @@ async function loadZFSPools() {
         data.pools.forEach(pool => {
             const isOnline = pool.health === 'ONLINE';
             const healthClass = isOnline ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20' : 'text-rose-400 bg-rose-500/10 border-rose-500/20';
+            const isWindowsDrive = pool.name.startsWith('Windows_') || pool.name.startsWith('Drive_');
+            
+            const actionsHtml = isWindowsDrive
+                ? `<button onclick="alert('Host drive volume ${pool.name} is active and online with full NTFS/Windows integrity.')" class="bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 border border-cyan-500/20 text-[10px] font-bold px-3 py-1.5 rounded-lg transition-all">Volume Status: Active</button>`
+                : `<button onclick="scrubPool('${pool.name}')" class="bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 border border-cyan-500/20 text-[10px] font-bold px-3 py-1.5 rounded-lg transition-all">Scrub Pool</button>
+                   <button onclick="destroyPool('${pool.name}')" class="bg-rose-500/10 hover:bg-rose-500/20 text-rose-500 border border-rose-500/20 text-[10px] font-bold px-3 py-1.5 rounded-lg transition-all">Destroy Pool</button>`;
             
             poolsList.innerHTML += `
                 <div class="bg-slate-900/40 border border-slate-800 p-5 rounded-xl space-y-3">
@@ -179,12 +208,7 @@ async function loadZFSPools() {
                     </div>
                     
                     <div class="flex justify-end gap-2 mt-4 pt-3 border-t border-slate-800/40">
-                        <button onclick="scrubPool('${pool.name}')" class="bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 border border-cyan-500/20 text-[10px] font-bold px-3 py-1.5 rounded-lg transition-all">
-                            Scrub Pool
-                        </button>
-                        <button onclick="destroyPool('${pool.name}')" class="bg-rose-500/10 hover:bg-rose-500/20 text-rose-500 border border-rose-500/20 text-[10px] font-bold px-3 py-1.5 rounded-lg transition-all">
-                            Destroy Pool
-                        </button>
+                        ${actionsHtml}
                     </div>
                 </div>
             `;
@@ -406,14 +430,22 @@ async function loadShares() {
         smbList.innerHTML = '';
         
         if (smbData.shares.length === 0) {
-            smbList.innerHTML = '<p class="text-slate-500 text-xs">No active Samba shares configured</p>';
+            smbList.innerHTML = '<p class="text-slate-500 text-xs">No active SMB shares configured</p>';
         } else {
             smbData.shares.forEach(share => {
+                const path = (share.config && (share.config.path || share.config.Path)) || 'N/A';
+                const comment = (share.config && (share.config.comment || share.config.Comment)) || '';
+                const isSysAdmin = share.name.endsWith('$') || share.name === 'IPC$' || share.name === 'ADMIN$';
+                
                 smbList.innerHTML += `
                     <div class="p-4 bg-slate-900/40 border border-slate-800 rounded-xl flex justify-between items-center">
                         <div>
-                            <div class="font-bold text-white text-base">${share.name}</div>
-                            <div class="text-xs text-slate-400 font-mono mt-1">${share.config.path || 'N/A'}</div>
+                            <div class="flex items-center space-x-2">
+                                <span class="font-bold text-white text-base">${share.name}</span>
+                                ${isSysAdmin ? '<span class="text-[10px] text-cyan-400 bg-cyan-500/10 border border-cyan-500/20 px-2 py-0.5 rounded font-semibold uppercase">System Admin</span>' : ''}
+                            </div>
+                            <div class="text-xs text-slate-400 font-mono mt-1">${path}</div>
+                            ${comment ? `<div class="text-[11px] text-slate-500 mt-0.5">${comment}</div>` : ''}
                         </div>
                         <button onclick="deleteSMB('${share.name}')" class="text-rose-500 hover:text-rose-400 font-bold text-xs bg-rose-500/10 hover:bg-rose-500/20 px-3 py-1.5 rounded-lg border border-rose-500/20 transition-all">
                             Delete
@@ -755,6 +787,11 @@ async function loadUsers() {
         }
         
         data.users.forEach(user => {
+            const role = user.role || 'Operator';
+            const roleColor = role === 'Admin' 
+                ? 'text-purple-400 bg-purple-500/10 border-purple-500/20' 
+                : (role === 'Operator' ? 'text-cyan-400 bg-cyan-500/10 border-cyan-500/20' : 'text-slate-400 bg-slate-500/10 border-slate-500/20');
+
             listDiv.innerHTML += `
                 <div class="glass-card bg-slate-900/40 p-4 rounded-xl border border-slate-850 flex justify-between items-center">
                     <div class="flex items-center space-x-3">
@@ -764,13 +801,22 @@ async function loadUsers() {
                             </svg>
                         </div>
                         <div>
-                            <span class="block font-bold text-white text-base">${user.username}</span>
-                            <span class="block text-slate-455 text-[10px]">Samba / Linux User</span>
+                            <div class="flex items-center space-x-2">
+                                <span class="block font-bold text-white text-base">${user.username}</span>
+                                <span class="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border ${roleColor}">${role}</span>
+                            </div>
+                            <span class="block text-slate-455 text-[10px]">Samba & Web NAS User</span>
                         </div>
                     </div>
-                    <button onclick="deleteUser('${user.username}')" class="text-rose-500 hover:text-rose-400 font-bold text-xs bg-rose-500/10 hover:bg-rose-500/20 px-3 py-1.5 rounded-lg border border-rose-500/20 transition-all">
-                        Remove
-                    </button>
+                    <div class="flex items-center space-x-2">
+                        <button onclick="showPasswordModalForUser('${user.username}')" class="text-cyan-400 hover:text-cyan-300 font-bold text-xs bg-cyan-500/10 hover:bg-cyan-500/20 px-2.5 py-1.5 rounded-lg border border-cyan-500/20 transition-all flex items-center space-x-1" title="Change or Reset Password">
+                            <span>🔑 Password</span>
+                        </button>
+                        ${user.username !== 'admin' ? `
+                        <button onclick="deleteUser('${user.username}')" class="text-rose-500 hover:text-rose-400 font-bold text-xs bg-rose-500/10 hover:bg-rose-500/20 px-2.5 py-1.5 rounded-lg border border-rose-500/20 transition-all">
+                            Remove
+                        </button>` : `<span class="text-xs text-slate-500 font-mono px-1">Protected</span>`}
+                    </div>
                 </div>
             `;
         });
@@ -793,16 +839,17 @@ async function createUser(event) {
     event.preventDefault();
     const username = document.getElementById('user-username').value;
     const password = document.getElementById('user-password').value;
+    const role = document.getElementById('user-role') ? document.getElementById('user-role').value : 'Operator';
     
     try {
         const response = await fetch(`${API_BASE}/users`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({username, password})
+            body: JSON.stringify({username, password, role})
         });
         
         if (response.ok) {
-            alert(`User "${username}" created successfully!`);
+            alert(`User "${username}" (${role}) created successfully!`);
             hideCreateUser();
             loadUsers();
         } else {
@@ -832,6 +879,162 @@ async function deleteUser(username) {
         alert(`Error: ${e.message}`);
     }
 }
+
+// ==================== PASSWORD MANAGEMENT ====================
+function showPasswordModalForUser(targetUsername) {
+    const currentUsername = document.getElementById('header-username')?.textContent?.trim() || 'admin';
+    if (targetUsername.toLowerCase() === currentUsername.toLowerCase()) {
+        showChangeOwnPassword();
+    } else {
+        showAdminResetPassword(targetUsername);
+    }
+}
+
+function showChangeOwnPassword() {
+    const currentUsername = document.getElementById('header-username')?.textContent?.trim() || 'admin';
+    const targetEl = document.getElementById('pwd-target-user');
+    if (targetEl) targetEl.value = currentUsername;
+    const modeEl = document.getElementById('pwd-mode');
+    if (modeEl) modeEl.value = 'self';
+    const headingEl = document.getElementById('pwd-modal-heading');
+    if (headingEl) headingEl.textContent = `Change Password (${currentUsername})`;
+    
+    const currContainer = document.getElementById('pwd-current-container');
+    if (currContainer) currContainer.classList.remove('hidden');
+    
+    const currInput = document.getElementById('pwd-current');
+    if (currInput) {
+        currInput.required = true;
+        currInput.value = '';
+    }
+    
+    const newPwd = document.getElementById('pwd-new');
+    if (newPwd) newPwd.value = '';
+    const confirmPwd = document.getElementById('pwd-confirm');
+    if (confirmPwd) confirmPwd.value = '';
+    
+    const errDiv = document.getElementById('pwd-error-msg');
+    if (errDiv) { errDiv.classList.add('hidden'); errDiv.textContent = ''; }
+    
+    const modal = document.getElementById('change-password-modal');
+    if (modal) {
+        modal.classList.remove('hidden');
+        modal.classList.add('flex');
+    }
+}
+
+function showAdminResetPassword(targetUsername) {
+    const targetEl = document.getElementById('pwd-target-user');
+    if (targetEl) targetEl.value = targetUsername;
+    const modeEl = document.getElementById('pwd-mode');
+    if (modeEl) modeEl.value = 'admin-reset';
+    const headingEl = document.getElementById('pwd-modal-heading');
+    if (headingEl) headingEl.textContent = `Reset Password: ${targetUsername}`;
+    
+    const currContainer = document.getElementById('pwd-current-container');
+    if (currContainer) currContainer.classList.add('hidden');
+    
+    const currInput = document.getElementById('pwd-current');
+    if (currInput) {
+        currInput.required = false;
+        currInput.value = '';
+    }
+    
+    const newPwd = document.getElementById('pwd-new');
+    if (newPwd) newPwd.value = '';
+    const confirmPwd = document.getElementById('pwd-confirm');
+    if (confirmPwd) confirmPwd.value = '';
+    
+    const errDiv = document.getElementById('pwd-error-msg');
+    if (errDiv) { errDiv.classList.add('hidden'); errDiv.textContent = ''; }
+    
+    const modal = document.getElementById('change-password-modal');
+    if (modal) {
+        modal.classList.remove('hidden');
+        modal.classList.add('flex');
+    }
+}
+
+function hideChangePassword() {
+    const modal = document.getElementById('change-password-modal');
+    if (modal) {
+        modal.classList.add('hidden');
+        modal.classList.remove('flex');
+    }
+}
+
+async function handlePasswordSubmit(event) {
+    event.preventDefault();
+    const mode = document.getElementById('pwd-mode').value;
+    const targetUser = document.getElementById('pwd-target-user').value;
+    const currentPassword = document.getElementById('pwd-current').value;
+    const newPassword = document.getElementById('pwd-new').value;
+    const confirmPassword = document.getElementById('pwd-confirm').value;
+    const errDiv = document.getElementById('pwd-error-msg');
+    const submitBtn = document.getElementById('pwd-submit-btn');
+
+    if (newPassword !== confirmPassword) {
+        if (errDiv) {
+            errDiv.textContent = 'New passwords do not match. Please re-enter.';
+            errDiv.classList.remove('hidden');
+        }
+        return;
+    }
+
+    if (newPassword.length < 6) {
+        if (errDiv) {
+            errDiv.textContent = 'Password must be at least 6 characters long.';
+            errDiv.classList.remove('hidden');
+        }
+        return;
+    }
+
+    const originalText = submitBtn.textContent;
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Updating Password...';
+
+    try {
+        let response;
+        if (mode === 'self') {
+            response = await fetch(`${API_BASE}/auth/change-password`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ currentPassword, newPassword })
+            });
+        } else {
+            response = await fetch(`${API_BASE}/users/${encodeURIComponent(targetUser)}/password`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ newPassword })
+            });
+        }
+
+        const data = await response.json();
+        if (response.ok) {
+            alert(data.message || `Password for ${targetUser} changed successfully!`);
+            hideChangePassword();
+            loadUsers();
+        } else {
+            if (errDiv) {
+                errDiv.textContent = data.error || 'Failed to update password.';
+                errDiv.classList.remove('hidden');
+            } else {
+                alert(`Error: ${data.error || 'Failed to update password'}`);
+            }
+        }
+    } catch (e) {
+        if (errDiv) {
+            errDiv.textContent = `Network error: ${e.message}`;
+            errDiv.classList.remove('hidden');
+        } else {
+            alert(`Error: ${e.message}`);
+        }
+    } finally {
+        submitBtn.disabled = false;
+        submitBtn.textContent = originalText;
+    }
+}
+
 
 // ZFS Snapshots
 async function loadZfsSnapshots() {
@@ -1069,6 +1272,10 @@ async function scrubPool(poolName) {
 }
 
 async function destroyPool(poolName) {
+    if (poolName.startsWith('Windows_') || poolName.startsWith('Drive_')) {
+        alert(`Host volume "${poolName}" is a physical Windows drive and cannot be deleted.`);
+        return;
+    }
     const doubleCheck = confirm(`DANGER WARNING: Are you sure you want to completely destroy the ZFS pool "${poolName}"?\n\nThis will PERMANENTLY DESTROY all datasets, snapshots, and data files within this pool! THIS CANNOT BE UNDONE!`);
     if (!doubleCheck) return;
     
@@ -1105,6 +1312,24 @@ async function checkAuth() {
         
         if (data.authenticated) {
             document.getElementById('login-screen').classList.add('hidden');
+            
+            // Update active user badge in header
+            const userEl = document.getElementById('header-username');
+            const roleEl = document.getElementById('header-user-role');
+            if (userEl && data.username) userEl.textContent = data.username;
+            if (roleEl && data.role) {
+                roleEl.textContent = data.role;
+                if (data.role === 'Admin') {
+                    roleEl.className = 'px-2 py-0.5 text-[10px] uppercase font-bold tracking-wider rounded-md bg-purple-500/20 text-purple-400 border border-purple-500/30';
+                } else if (data.role === 'Operator') {
+                    roleEl.className = 'px-2 py-0.5 text-[10px] uppercase font-bold tracking-wider rounded-md bg-cyan-500/20 text-cyan-400 border border-cyan-500/30';
+                } else {
+                    roleEl.className = 'px-2 py-0.5 text-[10px] uppercase font-bold tracking-wider rounded-md bg-amber-500/20 text-amber-400 border border-amber-500/30';
+                }
+            }
+
+            // Sync quick indicators
+            updateHeaderQuickIndicators();
             showTab('dashboard');
         } else {
             document.getElementById('login-screen').classList.remove('hidden');
@@ -1134,7 +1359,7 @@ async function handleLogin(event) {
             document.getElementById('login-screen').classList.add('hidden');
             document.getElementById('login-username').value = '';
             document.getElementById('login-password').value = '';
-            showTab('dashboard');
+            await checkAuth();
         } else {
             errDiv.classList.remove('hidden');
         }
@@ -1283,3 +1508,530 @@ async function runSync() {
         alert(`Error: ${error.message}`);
     }
 }
+
+// ==================== SSL / TLS & LET'S ENCRYPT ====================
+async function loadSslStatus() {
+    try {
+        const response = await fetch(`${API_BASE}/ssl/status`);
+        const data = await response.json();
+
+        const badge = document.getElementById('ssl-status-badge');
+        if (badge) {
+            if (data.enabled) {
+                badge.innerHTML = `<span class="text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">Active (${data.certType})</span>`;
+            } else {
+                badge.innerHTML = `<span class="text-rose-400 bg-rose-500/10 px-2 py-0.5 rounded border border-rose-500/20">Disabled (HTTP)</span>`;
+            }
+        }
+
+        const domainEl = document.getElementById('ssl-domain');
+        if (domainEl) domainEl.textContent = data.domain || 'None';
+
+        const expiresEl = document.getElementById('ssl-expires');
+        if (expiresEl) {
+            expiresEl.textContent = data.expiresAt ? `${data.expiresAt} (${data.daysRemaining}d left)` : 'N/A';
+        }
+
+        const portEl = document.getElementById('ssl-port');
+        if (portEl) portEl.textContent = data.httpsPort || 8443;
+    } catch (e) {
+        console.error('Failed to load SSL status:', e);
+    }
+}
+
+async function requestLetsEncrypt(event) {
+    event.preventDefault();
+    const domain = document.getElementById('le-domain').value.trim();
+    const email = document.getElementById('le-email').value.trim();
+    const staging = document.getElementById('le-staging').checked;
+    const btn = document.getElementById('le-submit-btn');
+
+    const originalText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Requesting ACME Challenge... (Please wait)';
+
+    try {
+        const response = await fetch(`${API_BASE}/ssl/letsencrypt/request`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ domain, email, staging })
+        });
+        const res = await response.json();
+
+        if (response.ok) {
+            alert(`Success! ${res.message}`);
+            loadSslStatus();
+        } else {
+            alert(`Let's Encrypt Error: ${res.error || 'Challenge or validation failed'}`);
+        }
+    } catch (e) {
+        alert(`Error: ${e.message}`);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = originalText;
+    }
+}
+
+async function generateSelfSigned(event) {
+    event.preventDefault();
+    const domain = document.getElementById('self-domain').value.trim();
+    const btn = document.getElementById('self-submit-btn');
+
+    btn.disabled = true;
+    btn.textContent = 'Generating RSA Key & Cert...';
+
+    try {
+        const response = await fetch(`${API_BASE}/ssl/self-signed`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ domain })
+        });
+        const res = await response.json();
+
+        if (response.ok) {
+            alert(`Success! ${res.message}`);
+            loadSslStatus();
+        } else {
+            alert(`Error: ${res.error || 'Failed to generate self-signed certificate'}`);
+        }
+    } catch (e) {
+        alert(`Error: ${e.message}`);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Generate Self-Signed Certificate';
+    }
+}
+
+// ==================== AUTOMATED SNAPSHOT SCHEDULER ====================
+async function loadSnapshotSchedule() {
+    try {
+        const response = await fetch(`${API_BASE}/snapshots/schedule`);
+        const data = await response.json();
+
+        const statusEl = document.getElementById('sched-status');
+        if (statusEl) {
+            statusEl.innerHTML = data.enabled 
+                ? '<span class="text-emerald-400">Active</span>' 
+                : '<span class="text-slate-400">Disabled</span>';
+        }
+
+        const freqEl = document.getElementById('sched-freq');
+        if (freqEl) freqEl.textContent = (data.frequency || 'daily').toUpperCase();
+
+        const retEl = document.getElementById('sched-retention');
+        if (retEl) retEl.textContent = `${data.retentionCount} Snapshots`;
+
+        const nextEl = document.getElementById('sched-next');
+        if (nextEl) {
+            nextEl.textContent = data.enabled && data.nextRun 
+                ? new Date(data.nextRun).toLocaleString() 
+                : (data.enabled ? 'Calculating next run...' : 'Disabled');
+        }
+
+        const enableInput = document.getElementById('sched-enable');
+        if (enableInput) enableInput.checked = data.enabled;
+
+        const freqInput = document.getElementById('sched-freq-input');
+        if (freqInput) freqInput.value = data.frequency || 'daily';
+
+        const retInput = document.getElementById('sched-retention-input');
+        if (retInput) retInput.value = data.retentionCount || 7;
+    } catch (e) {
+        console.error('Failed to load snapshot schedule:', e);
+    }
+}
+
+async function saveSnapshotSchedule(event) {
+    event.preventDefault();
+    const enabled = document.getElementById('sched-enable').checked;
+    const frequency = document.getElementById('sched-freq-input').value;
+    const retentionCount = parseInt(document.getElementById('sched-retention-input').value) || 7;
+
+    try {
+        const response = await fetch(`${API_BASE}/snapshots/schedule`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                enabled,
+                frequency,
+                targetPool: 'tank',
+                retentionCount
+            })
+        });
+
+        if (response.ok) {
+            alert('Snapshot schedule saved successfully!');
+            loadSnapshotSchedule();
+        } else {
+            alert('Failed to save snapshot schedule.');
+        }
+    } catch (e) {
+        alert(`Error: ${e.message}`);
+    }
+}
+
+async function runSnapshotNow() {
+    try {
+        const response = await fetch(`${API_BASE}/snapshots/schedule/run`, { method: 'POST' });
+        if (response.ok) {
+            alert('Automated snapshot cycle executed successfully!');
+            loadZfsSnapshots();
+            loadSnapshotSchedule();
+        } else {
+            alert('Failed to trigger snapshot cycle.');
+        }
+    } catch (e) {
+        alert(`Error: ${e.message}`);
+    }
+}
+
+// ==================== SYSTEM & EXTENSIONS QUICK SYNC ====================
+async function updateHeaderQuickIndicators() {
+    try {
+        // Quick SSL check
+        const sslResp = await fetch(`${API_BASE}/ssl/status`);
+        if (sslResp.ok) {
+            const sslData = await sslResp.json();
+            const sslText = document.getElementById('header-ssl-text');
+            const dashSslBadge = document.getElementById('dash-ssl-badge');
+            const dashSslSub = document.getElementById('dash-ssl-sub');
+            if (sslData.enabled) {
+                if (sslText) sslText.textContent = `HTTPS :${sslData.httpsPort || 8443}`;
+                if (dashSslBadge) {
+                    dashSslBadge.className = 'px-2 py-0.5 text-[10px] font-bold rounded-md bg-emerald-500/10 text-emerald-400 border border-emerald-500/20';
+                    dashSslBadge.textContent = 'Active :8443';
+                }
+                if (dashSslSub) dashSslSub.textContent = `${sslData.certType} (${sslData.daysRemaining}d left)`;
+            } else {
+                if (sslText) sslText.textContent = 'HTTP (No SSL)';
+                if (dashSslBadge) {
+                    dashSslBadge.className = 'px-2 py-0.5 text-[10px] font-bold rounded-md bg-slate-800 text-slate-400 border border-slate-700';
+                    dashSslBadge.textContent = 'Disabled';
+                }
+                if (dashSslSub) dashSslSub.textContent = 'Click to configure';
+            }
+        }
+
+        // Quick snapshot schedule check
+        const snapResp = await fetch(`${API_BASE}/snapshots/schedule`);
+        if (snapResp.ok) {
+            const snapData = await snapResp.json();
+            const dashSnapBadge = document.getElementById('dash-snap-badge');
+            const dashSnapSub = document.getElementById('dash-snap-sub');
+            if (snapData.enabled) {
+                if (dashSnapBadge) {
+                    dashSnapBadge.className = 'px-2 py-0.5 text-[10px] font-bold rounded-md bg-cyan-500/10 text-cyan-400 border border-cyan-500/20';
+                    dashSnapBadge.textContent = `${(snapData.frequency || 'Daily').toUpperCase()}`;
+                }
+                if (dashSnapSub) dashSnapSub.textContent = `Retaining ${snapData.retentionCount} snapshots`;
+            } else {
+                if (dashSnapBadge) {
+                    dashSnapBadge.className = 'px-2 py-0.5 text-[10px] font-bold rounded-md bg-slate-800 text-slate-400 border border-slate-700';
+                    dashSnapBadge.textContent = 'Off';
+                }
+                if (dashSnapSub) dashSnapSub.textContent = 'Automated backup paused';
+            }
+        }
+
+        // Quick plugins count
+        const pluginsResp = await fetch(`${API_BASE}/plugins`);
+        if (pluginsResp.ok) {
+            const pData = await pluginsResp.json();
+            const activeCount = (pData.plugins || []).filter(p => p.enabled).length;
+            const countNav = document.getElementById('plugins-nav-count');
+            const dashPluginBadge = document.getElementById('dash-plugin-badge');
+            const dashPluginSub = document.getElementById('dash-plugin-sub');
+            if (countNav) countNav.textContent = activeCount;
+            if (dashPluginBadge) dashPluginBadge.textContent = `${activeCount} Active`;
+            if (dashPluginSub) dashPluginSub.textContent = `${pData.plugins.length} Available in Catalog`;
+        }
+    } catch (e) {
+        console.error('Failed to update quick indicators:', e);
+    }
+}
+
+// ==================== PLUGINS & EXTENSION CENTER ====================
+let allPlugins = [];
+let activePluginCategory = 'all';
+let pluginSearchQuery = '';
+
+async function loadPlugins() {
+    try {
+        const response = await fetch(`${API_BASE}/plugins`);
+        const data = await response.json();
+        allPlugins = data.plugins || [];
+
+        // Update stats
+        const activeCount = allPlugins.filter(p => p.enabled).length;
+        const activeStat = document.getElementById('plugin-stat-active');
+        if (activeStat) activeStat.textContent = `${activeCount} Running`;
+
+        const catalogStat = document.getElementById('plugin-stat-catalog');
+        if (catalogStat) catalogStat.textContent = `${allPlugins.length} Available`;
+
+        const navCount = document.getElementById('plugins-nav-count');
+        if (navCount) navCount.textContent = activeCount;
+
+        renderPlugins();
+    } catch (e) {
+        console.error('Failed to load plugins:', e);
+    }
+}
+
+function refreshPlugins() {
+    loadPlugins();
+}
+
+function filterPlugins(category) {
+    activePluginCategory = category;
+    
+    // Update button styles
+    document.querySelectorAll('.plugin-filter-btn').forEach(btn => {
+        if (btn.getAttribute('data-category') === category) {
+            btn.className = 'plugin-filter-btn px-3 py-1.5 rounded-lg text-xs font-semibold bg-cyan-500/20 text-cyan-400 border border-cyan-500/40';
+        } else {
+            btn.className = 'plugin-filter-btn px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-900 text-slate-400 hover:text-white border border-slate-800';
+        }
+    });
+
+    renderPlugins();
+}
+
+function searchPlugins(event) {
+    pluginSearchQuery = (event.target.value || '').toLowerCase().trim();
+    renderPlugins();
+}
+
+function renderPlugins() {
+    const grid = document.getElementById('plugins-grid');
+    if (!grid) return;
+
+    let filtered = allPlugins;
+
+    // Filter by Category
+    if (activePluginCategory === 'installed') {
+        filtered = filtered.filter(p => p.installed);
+    } else if (activePluginCategory !== 'all') {
+        filtered = filtered.filter(p => p.category.toLowerCase() === activePluginCategory.toLowerCase());
+    }
+
+    // Filter by Search Query
+    if (pluginSearchQuery) {
+        filtered = filtered.filter(p => 
+            p.name.toLowerCase().includes(pluginSearchQuery) ||
+            p.description.toLowerCase().includes(pluginSearchQuery) ||
+            p.author.toLowerCase().includes(pluginSearchQuery) ||
+            p.id.toLowerCase().includes(pluginSearchQuery)
+        );
+    }
+
+    if (filtered.length === 0) {
+        grid.innerHTML = `
+            <div class="col-span-full glass-card rounded-2xl p-12 text-center border border-slate-800 space-y-3">
+                <span class="text-4xl">🔍</span>
+                <h4 class="text-lg font-bold text-white">No plugins match your filter</h4>
+                <p class="text-sm text-slate-400">Try adjusting your search query or selecting a different category.</p>
+            </div>
+        `;
+        return;
+    }
+
+    grid.innerHTML = filtered.map(plugin => {
+        const isInstalled = plugin.installed;
+        const isRunning = plugin.enabled;
+
+        let statusBadge = '';
+        if (isRunning) {
+            statusBadge = `<span class="inline-flex items-center space-x-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                <span>Active</span>
+            </span>`;
+        } else if (isInstalled) {
+            statusBadge = `<span class="inline-flex items-center space-x-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                <span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+                <span>Stopped</span>
+            </span>`;
+        } else {
+            statusBadge = `<span class="inline-flex items-center space-x-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold bg-slate-800 text-slate-400 border border-slate-700">
+                <span>Available</span>
+            </span>`;
+        }
+
+        // Web UI link (if active & has defaultPort or webPath)
+        const host = window.location.hostname || 'localhost';
+        const port = plugin.defaultPort;
+        const webUrl = (plugin.webPath !== null && port) ? `http://${host}:${port}${plugin.webPath || '/'}` : null;
+
+        return `
+            <div class="glass-card rounded-2xl p-6 shadow-xl flex flex-col justify-between border border-slate-800 hover:border-slate-700 transition-all space-y-5">
+                <div class="space-y-4">
+                    <div class="flex items-start justify-between">
+                        <div class="flex items-center space-x-3">
+                            <span class="text-3xl bg-slate-900/80 p-2.5 rounded-2xl border border-slate-800">${plugin.icon}</span>
+                            <div>
+                                <h4 class="text-base font-bold text-white flex items-center space-x-2">
+                                    <span>${plugin.name}</span>
+                                </h4>
+                                <div class="flex items-center space-x-2 mt-0.5">
+                                    <span class="text-[11px] font-mono text-cyan-400">v${plugin.version}</span>
+                                    <span class="text-slate-600">•</span>
+                                    <span class="text-[11px] text-slate-400">${plugin.category}</span>
+                                </div>
+                            </div>
+                        </div>
+                        ${statusBadge}
+                    </div>
+
+                    <p class="text-xs text-slate-300 leading-relaxed">${plugin.description}</p>
+
+                    <div class="text-[11px] text-slate-400 flex items-center justify-between border-t border-slate-800/80 pt-3 font-mono">
+                        <span>By ${plugin.author}</span>
+                        ${plugin.defaultPort ? `<span>Port: <span class="text-slate-200 font-bold">${plugin.defaultPort}</span></span>` : ''}
+                    </div>
+                </div>
+
+                <div class="space-y-2 pt-2 border-t border-slate-800/80">
+                    <div class="flex items-center justify-between gap-2">
+                        ${isInstalled ? `
+                            <div class="flex items-center space-x-2">
+                                <label class="relative inline-flex items-center cursor-pointer">
+                                    <input type="checkbox" class="sr-only peer" ${isRunning ? 'checked' : ''} onchange="togglePlugin('${plugin.id}', this.checked)">
+                                    <div class="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-cyan-500"></div>
+                                </label>
+                                <span class="text-xs font-semibold ${isRunning ? 'text-cyan-400' : 'text-slate-400'}">${isRunning ? 'Enabled' : 'Disabled'}</span>
+                            </div>
+                            <div class="flex items-center space-x-2">
+                                ${isRunning && webUrl ? `
+                                    <a href="${webUrl}" target="_blank" class="bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 text-xs font-bold px-3 py-1.5 rounded-lg transition-all flex items-center space-x-1" title="Open Web Service UI">
+                                        <span>Open UI</span>
+                                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path></svg>
+                                    </a>
+                                ` : ''}
+                                <button onclick="openPluginConfig('${plugin.id}')" class="bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs px-2.5 py-1.5 rounded-lg border border-slate-700 transition-all" title="Settings">
+                                    ⚙️
+                                </button>
+                                <button onclick="uninstallPlugin('${plugin.id}')" class="bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 text-xs px-2.5 py-1.5 rounded-lg border border-rose-500/20 transition-all" title="Uninstall Plugin">
+                                    🗑️
+                                </button>
+                            </div>
+                        ` : `
+                            <button onclick="installPlugin('${plugin.id}')" class="w-full bg-cyan-500 hover:bg-cyan-600 text-slate-950 font-bold text-xs py-2 rounded-xl transition-all shadow-md shadow-cyan-500/10 flex items-center justify-center space-x-1.5">
+                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                                <span>Install Extension</span>
+                            </button>
+                        `}
+                    </div>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+async function installPlugin(id) {
+    try {
+        const response = await fetch(`${API_BASE}/plugins/install`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id })
+        });
+        const data = await response.json();
+        if (response.ok) {
+            loadPlugins();
+            updateHeaderQuickIndicators();
+        } else {
+            alert(`Install Error: ${data.error || 'Failed to install plugin'}`);
+        }
+    } catch (e) {
+        alert(`Error: ${e.message}`);
+    }
+}
+
+async function uninstallPlugin(id) {
+    if (!confirm(`Are you sure you want to uninstall this plugin?`)) return;
+    try {
+        const response = await fetch(`${API_BASE}/plugins/uninstall`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id })
+        });
+        const data = await response.json();
+        if (response.ok) {
+            loadPlugins();
+            updateHeaderQuickIndicators();
+        } else {
+            alert(`Uninstall Error: ${data.error || 'Failed to uninstall plugin'}`);
+        }
+    } catch (e) {
+        alert(`Error: ${e.message}`);
+    }
+}
+
+async function togglePlugin(id, enabled) {
+    try {
+        const response = await fetch(`${API_BASE}/plugins/toggle`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id, enabled })
+        });
+        const data = await response.json();
+        if (response.ok) {
+            loadPlugins();
+            updateHeaderQuickIndicators();
+        } else {
+            alert(`Toggle Error: ${data.error || 'Failed to toggle plugin state'}`);
+        }
+    } catch (e) {
+        alert(`Error: ${e.message}`);
+    }
+}
+
+function openPluginConfig(id) {
+    const plugin = allPlugins.find(p => p.id === id);
+    if (!plugin) return;
+
+    document.getElementById('config-plugin-id').value = id;
+    document.getElementById('plugin-modal-title').innerHTML = `<span>Settings: ${plugin.name}</span>`;
+    document.getElementById('config-plugin-port').value = plugin.defaultPort || '';
+
+    const extraFields = document.getElementById('config-extra-fields');
+    extraFields.innerHTML = `
+        <div class="bg-slate-900/60 p-3 rounded-xl border border-slate-800 text-xs text-slate-400 space-y-1">
+            <p><strong class="text-white">Author:</strong> ${plugin.author}</p>
+            <p><strong class="text-white">Version:</strong> ${plugin.version}</p>
+            <p><strong class="text-white">Category:</strong> ${plugin.category}</p>
+            <p><strong class="text-white">Status:</strong> ${plugin.status}</p>
+        </div>
+    `;
+
+    document.getElementById('plugin-config-modal').classList.remove('hidden');
+}
+
+function hidePluginConfig() {
+    document.getElementById('plugin-config-modal').classList.add('hidden');
+}
+
+async function savePluginConfig(event) {
+    event.preventDefault();
+    const id = document.getElementById('config-plugin-id').value;
+    const portVal = document.getElementById('config-plugin-port').value;
+    const port = portVal ? parseInt(portVal) : null;
+
+    try {
+        const response = await fetch(`${API_BASE}/plugins/config`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id, port, settings: {} })
+        });
+        const data = await response.json();
+        if (response.ok) {
+            hidePluginConfig();
+            loadPlugins();
+        } else {
+            alert(`Config Error: ${data.error || 'Failed to save configuration'}`);
+        }
+    } catch (e) {
+        alert(`Error: ${e.message}`);
+    }
+}
+
+

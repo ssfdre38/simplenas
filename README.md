@@ -2,9 +2,9 @@
 
 [![Sponsored by Barrer Software](https://img.shields.io/badge/Sponsored_by-Barrer_Software-0A0E27?style=for-the-badge)](https://barrersoftware.com)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
-[![.NET](https://img.shields.io/badge/.NET-8.0-512BD4?style=for-the-badge&logo=dotnet)](https://dotnet.microsoft.com/)
+[![.NET](https://img.shields.io/badge/.NET-10.0-512BD4?style=for-the-badge&logo=dotnet)](https://dotnet.microsoft.com/)
 
-**Modern, lightweight NAS management panel built with C# and ASP.NET Core**
+**Modern, lightweight NAS management panel built with C# 14 and ASP.NET Core (.NET 10)**
 
 SimpleNAS is an open-source Network Attached Storage (NAS) management solution designed for simplicity and performance. Built with C# ASP.NET Core, it provides a clean web interface for managing ZFS storage pools, monitoring system resources, and configuring network shares.
 
@@ -26,7 +26,7 @@ SimpleNAS is an open-source Network Attached Storage (NAS) management solution d
 
 ### Prerequisites
 
-- .NET 8.0 Runtime or later
+- .NET 10.0 Runtime or later
 - Linux system (Ubuntu 22.04+ recommended)
 - ZFS utilities installed (`zfsutils-linux`)
 
@@ -113,21 +113,79 @@ dotnet run
 
 ### Tech Stack
 
-- **Backend**: ASP.NET Core 8.0 (C#)
+- **Backend**: ASP.NET Core (.NET 10.0 / C# 14)
 - **Frontend**: HTML, CSS, JavaScript (vanilla)
 - **Storage**: ZFS integration via shell commands
 - **Authentication**: Cookie-based sessions
 
 ## 📋 Roadmap
 
-- [ ] Multi-user support with role-based access
-- [x] SMB/NFS share management UI
+- [x] Multi-user support with role-based access (Admin, Operator, Viewer)
+- [x] SMB/NFS share management UI (with Windows & Linux cross-platform shares)
 - [x] Cloud Storage (Rclone & MergerFS) Integration
-- [ ] Automated backups and snapshots
+- [x] Automated backups and snapshots with scheduled retention pruning
 - [x] Email/webhook notifications
-- [ ] Docker support
-- [ ] HTTPS/SSL configuration helper
-- [ ] Plugin system for extensibility
+- [x] Docker support (.NET 10 multi-stage build & docker-compose)
+- [x] HTTPS/SSL configuration helper (Let's Encrypt ACME v2 & Self-Signed SAN)
+- [x] Plugin system for extensibility (1-click marketplace catalog, JSON manifests, and runtime lifecycle)
+
+## 🧩 Plugin & Extension Center
+
+SimpleNAS features an extensible architecture allowing services to be installed, monitored, and launched directly from the web panel:
+
+- **🐳 Docker Engine**: Container virtualization runtime for running microservices alongside SimpleNAS.
+- **🎬 Jellyfin Media Server**: Free & open-source media streaming platform (Port `8096`).
+- **🍿 Plex Media Server**: Stream media collections across devices with hardware transcoding (Port `32400`).
+- **🔒 Tailscale Mesh VPN**: Zero-config mesh networking for secure remote access from anywhere.
+- **⚡ Transmission**: Fast, lightweight BitTorrent background downloader with web UI (Port `9091`).
+- **☁️ Nextcloud Hub**: Private cloud file storage, synchronization, and collaboration (Port `8080`).
+- **🛡️ WireGuard Server**: High-performance, modern cryptographic VPN tunnel manager.
+- **📁 FileBrowser UI**: Rich browser-based file manager for exploring NAS datasets and pools (Port `8082`).
+
+### Creating Custom Plugins
+Plugins can be added by placing an isolated folder in `/plugins` containing a `plugin.json` manifest:
+```json
+{
+  "id": "custom-service",
+  "name": "Custom Service",
+  "description": "My custom NAS service extension",
+  "version": "1.0.0",
+  "author": "Community",
+  "category": "Tools",
+  "icon": "🔧",
+  "defaultPort": 9999,
+  "webPath": "/"
+}
+```
+
+## 🐳 Docker Deployment
+
+SimpleNAS can be deployed in containers using the provided multi-stage `Dockerfile` and `docker-compose.yml`:
+
+```bash
+# Build and run with Docker Compose
+docker compose up -d
+```
+
+The container exposes:
+- **Port 8000**: HTTP web dashboard & ACME HTTP-01 challenge routing
+- **Port 8443**: HTTPS secured dashboard
+- **Port 445**: SMB / Samba file sharing
+
+## 🔒 SSL / TLS & Let's Encrypt
+
+SimpleNAS includes automated certificate management:
+- **Let's Encrypt (ACME v2)**: Request trusted certificates directly from the dashboard using HTTP-01 challenges.
+- **Self-Signed Certificates**: Generate instant 2048-bit RSA SAN certificates for internal LANs or staging.
+- **Dynamic Kestrel Binding**: Secures the panel on HTTPS port `8443` without requiring an external reverse proxy.
+
+## 👥 Role-Based Access Control (RBAC)
+
+Manage access permissions with built-in roles:
+- **Admin**: Full system access (pool creation, share deletion, user management, SSL configuration).
+- **Operator**: Daily operations (trigger snapshots, manage shares, restart services; cannot alter system users).
+- **Viewer**: Read-only monitoring (metrics, pools, logs; all write mutations return `403 Forbidden`).
+
 
 ## 🤝 Contributing
 
