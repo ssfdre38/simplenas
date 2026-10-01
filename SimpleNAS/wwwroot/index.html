@@ -96,6 +96,9 @@
         </div>
     </div>
 
+    <!-- Toast Notifications Container -->
+    <div id="toast-container" class="fixed top-20 right-6 z-50 flex flex-col space-y-3 pointer-events-none"></div>
+
     <!-- Header Navigation -->
     <nav class="sticky top-0 z-40 bg-slate-950/85 backdrop-blur-md border-b border-slate-900 text-slate-100 px-6 py-4">
         <div class="max-w-7xl mx-auto flex justify-between items-center">
@@ -116,12 +119,19 @@
                     <button onclick="showTab('dashboard')" class="nav-btn px-4 py-2 text-sm font-semibold rounded-lg text-slate-400 hover:text-white transition-all duration-200 border border-transparent" data-tab="dashboard">Dashboard</button>
                     <button onclick="showTab('zfs')" class="nav-btn px-4 py-2 text-sm font-semibold rounded-lg text-slate-400 hover:text-white transition-all duration-200 border border-transparent" data-tab="zfs"><span id="nav-storage-label">Storage Pools</span></button>
                     <button onclick="showTab('shares')" class="nav-btn px-4 py-2 text-sm font-semibold rounded-lg text-slate-400 hover:text-white transition-all duration-200 border border-transparent" data-tab="shares">File Shares</button>
+                    <button onclick="showTab('files')" class="nav-btn px-4 py-2 text-sm font-semibold rounded-lg text-slate-400 hover:text-white transition-all duration-200 border border-transparent flex items-center space-x-1.5" data-tab="files">
+                        <span>Explorer</span>
+                    </button>
                     <button onclick="showTab('cloud')" class="nav-btn px-4 py-2 text-sm font-semibold rounded-lg text-slate-400 hover:text-white transition-all duration-200 border border-transparent" data-tab="cloud">Cloud Storage</button>
                     <button onclick="showTab('network')" class="nav-btn px-4 py-2 text-sm font-semibold rounded-lg text-slate-400 hover:text-white transition-all duration-200 border border-transparent" data-tab="network">Network</button>
                     <button onclick="showTab('users')" class="nav-btn px-4 py-2 text-sm font-semibold rounded-lg text-slate-400 hover:text-white transition-all duration-200 border border-transparent" data-tab="users">Users</button>
                     <button onclick="showTab('plugins')" class="nav-btn px-4 py-2 text-sm font-semibold rounded-lg text-slate-400 hover:text-white transition-all duration-200 border border-transparent flex items-center space-x-1.5" data-tab="plugins">
                         <span>Plugins</span>
-                        <span id="plugins-nav-count" class="bg-cyan-500/20 text-cyan-400 text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold">2</span>
+                        <span id="plugins-nav-count" class="bg-cyan-500/20 text-cyan-400 text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold">8</span>
+                    </button>
+                    <button onclick="showTab('logs')" class="nav-btn px-4 py-2 text-sm font-semibold rounded-lg text-slate-400 hover:text-white transition-all duration-200 border border-transparent flex items-center space-x-1.5" data-tab="logs">
+                        <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                        <span>Logs</span>
                     </button>
                 </div>
                 
@@ -981,6 +991,155 @@
                 <!-- Dynamically populated by app.js -->
             </div>
         </div>
+
+        <!-- FILES & DIRECTORY EXPLORER TAB -->
+        <div id="tab-files" class="tab-content hidden space-y-6">
+            <div class="flex flex-col sm:flex-row justify-between sm:items-center gap-4">
+                <div>
+                    <h2 class="text-3xl font-bold tracking-tight text-white flex items-center space-x-3">
+                        <span>Web File Explorer</span>
+                        <span class="text-xs bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 px-2.5 py-1 rounded-full font-mono uppercase font-bold tracking-wider">Live I/O</span>
+                    </h2>
+                    <p class="text-slate-400 text-sm">Browse directories, stream files, download, and drag-and-drop upload directly to your NAS array.</p>
+                </div>
+                <div class="flex items-center space-x-3">
+                    <button onclick="showCreateFolderModal()" class="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all flex items-center space-x-2">
+                        <svg class="w-4 h-4 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 13h6m-3-3v6m-9 1V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"></path></svg>
+                        <span>New Folder</span>
+                    </button>
+                    <label class="cursor-pointer bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-600 hover:to-blue-700 text-slate-950 font-bold px-4 py-2.5 rounded-xl text-sm transition-all flex items-center space-x-2 shadow-lg shadow-cyan-500/10">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>
+                        <span>Upload Files</span>
+                        <input type="file" id="file-upload-input" multiple onchange="handleFileUpload(event)" class="hidden">
+                    </label>
+                </div>
+            </div>
+
+            <!-- Root Volume / Mount Selector -->
+            <div class="glass-card rounded-2xl p-4 shadow-xl border border-slate-850 flex flex-wrap items-center justify-between gap-4">
+                <div class="flex items-center space-x-2 overflow-x-auto" id="file-roots-bar">
+                    <span class="text-xs font-mono uppercase text-slate-500 mr-1">Root Storage:</span>
+                    <!-- Dynamically populated root drives (C:\, D:\, /storage) -->
+                </div>
+                <div class="relative w-full sm:w-64">
+                    <span class="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-500">
+                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+                    </span>
+                    <input type="text" id="file-filter-input" oninput="filterFileList(event)" placeholder="Filter files in directory..." class="w-full bg-slate-900 border border-slate-750 rounded-xl pl-8 pr-3 py-1.5 text-xs text-white placeholder-slate-500 focus:border-cyan-500 focus:outline-none">
+                </div>
+            </div>
+
+            <!-- Breadcrumbs Navigation Bar -->
+            <div class="bg-slate-900/80 rounded-xl p-3 border border-slate-800 flex items-center space-x-2 text-xs font-mono overflow-x-auto text-slate-300" id="file-breadcrumbs">
+                <!-- Breadcrumb items populated by app.js -->
+            </div>
+
+            <!-- Drag & Drop Explorer File List -->
+            <div id="file-dropzone" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleFileDrop(event)" class="glass-card rounded-2xl p-4 shadow-xl border border-slate-850 transition-all min-h-[380px]">
+                <div id="file-upload-progress" class="hidden mb-4 p-3 bg-cyan-500/10 border border-cyan-500/20 rounded-xl">
+                    <div class="flex justify-between items-center text-xs mb-1.5 font-bold text-cyan-400">
+                        <span id="file-progress-label">Uploading files...</span>
+                        <span id="file-progress-percent">0%</span>
+                    </div>
+                    <div class="w-full bg-slate-950 rounded-full h-2 overflow-hidden">
+                        <div id="file-progress-bar" class="bg-gradient-to-r from-cyan-400 to-blue-500 h-2 rounded-full transition-all duration-300" style="width: 0%"></div>
+                    </div>
+                </div>
+
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left text-sm">
+                        <thead>
+                            <tr class="border-b border-slate-800 text-slate-400 text-xs uppercase font-mono tracking-wider">
+                                <th class="pb-3 pl-3">Name</th>
+                                <th class="pb-3 text-right">Size</th>
+                                <th class="pb-3 pl-6">Last Modified</th>
+                                <th class="pb-3 pr-3 text-right">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="files-table-body" class="divide-y divide-slate-850/60 font-mono text-xs">
+                            <tr><td colspan="4" class="py-12 text-center text-slate-500 font-sans">Loading directory...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- SYSTEM & AUDIT LOGS TAB -->
+        <div id="tab-logs" class="tab-content hidden space-y-6">
+            <div class="flex flex-col sm:flex-row justify-between sm:items-center gap-4">
+                <div>
+                    <h2 class="text-3xl font-bold tracking-tight text-white flex items-center space-x-3">
+                        <span>System & Security Audit Logs</span>
+                        <span class="flex items-center space-x-1.5 text-xs bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2.5 py-1 rounded-full font-mono uppercase font-bold tracking-wider">
+                            <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                            <span>Live Telemetry</span>
+                        </span>
+                    </h2>
+                    <p class="text-slate-400 text-sm">High-resolution audit log trail, authentication monitor, and system journal inspection.</p>
+                </div>
+                <div class="flex items-center space-x-3">
+                    <button onclick="refreshLogs()" class="bg-slate-800 hover:bg-slate-700 text-slate-300 px-4 py-2 rounded-xl text-sm font-semibold border border-slate-700 transition-all flex items-center space-x-2">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+                        <span>Refresh Logs</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Log Controls & Filters -->
+            <div class="glass-card rounded-2xl p-4 shadow-xl border border-slate-850 grid grid-cols-1 sm:grid-cols-4 gap-4">
+                <div>
+                    <label class="block text-[11px] font-bold text-slate-400 uppercase mb-1">View Mode</label>
+                    <select id="log-view-mode" onchange="switchLogView(this.value)" class="w-full bg-slate-900 border border-slate-750 rounded-xl px-3 py-2 text-xs text-white focus:border-cyan-500 focus:outline-none">
+                        <option value="audit">Structured Audit Trail</option>
+                        <option value="system">Raw Host OS Journal</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-[11px] font-bold text-slate-400 uppercase mb-1">Severity Filter</label>
+                    <select id="log-level-filter" onchange="filterLogs()" class="w-full bg-slate-900 border border-slate-750 rounded-xl px-3 py-2 text-xs text-white focus:border-cyan-500 focus:outline-none">
+                        <option value="all">All Severities</option>
+                        <option value="Info">Info</option>
+                        <option value="Warning">Warning</option>
+                        <option value="Error">Error</option>
+                        <option value="Security">Security</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-[11px] font-bold text-slate-400 uppercase mb-1">Category</label>
+                    <select id="log-category-filter" onchange="filterLogs()" class="w-full bg-slate-900 border border-slate-750 rounded-xl px-3 py-2 text-xs text-white focus:border-cyan-500 focus:outline-none">
+                        <option value="all">All Categories</option>
+                        <option value="Auth">Auth & Security</option>
+                        <option value="Storage">Storage & ZFS</option>
+                        <option value="Share">File Shares</option>
+                        <option value="File">File Explorer</option>
+                        <option value="Plugin">Plugins & Docker</option>
+                        <option value="System">System Core</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-[11px] font-bold text-slate-400 uppercase mb-1">Search Entries</label>
+                    <input type="text" id="log-search-input" oninput="filterLogs()" placeholder="Search logs..." class="w-full bg-slate-900 border border-slate-750 rounded-xl px-3 py-2 text-xs text-white focus:border-cyan-500 focus:outline-none placeholder-slate-500">
+                </div>
+            </div>
+
+            <!-- Structured Audit Trail Container -->
+            <div id="audit-logs-view" class="space-y-2.5">
+                <div id="audit-logs-list" class="space-y-2">
+                    <p class="text-slate-500 text-sm text-center py-8">Loading audit logs...</p>
+                </div>
+            </div>
+
+            <!-- Raw Host System Journal View -->
+            <div id="system-journal-view" class="hidden">
+                <div class="bg-slate-950 p-4 rounded-2xl border border-slate-800 shadow-2xl">
+                    <div class="flex justify-between items-center pb-2 mb-2 border-b border-slate-850 text-xs font-mono text-slate-400">
+                        <span>Host OS Journal Output</span>
+                        <span class="text-cyan-400">Latest 80 Events</span>
+                    </div>
+                    <pre id="system-journal-content" class="text-[11px] font-mono text-slate-300 overflow-x-auto whitespace-pre-wrap max-h-[500px] leading-relaxed">Loading journal output...</pre>
+                </div>
+            </div>
+        </div>
     </div>
 
     <!-- GLOBAL APPLICATION MODALS (Accessible from any tab or header) -->
@@ -1080,6 +1239,79 @@
         </div>
     </div>
 
+    <!-- Create Folder Modal -->
+    <div id="create-folder-modal" onclick="if(event.target === this) hideCreateFolderModal()" class="hidden fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+        <div class="glass-card rounded-2xl p-6 w-full max-w-md shadow-2xl space-y-4 border border-slate-800">
+            <h3 class="text-xl font-bold text-white mb-2 flex items-center space-x-2">
+                <svg class="w-5 h-5 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 13h6m-3-3v6m-9 1V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"></path></svg>
+                <span>Create Directory</span>
+            </h3>
+            <form onsubmit="handleCreateFolderSubmit(event)" class="space-y-4">
+                <div>
+                    <label class="block mb-1.5 text-xs font-bold text-slate-400 uppercase">Folder Name</label>
+                    <input type="text" id="new-folder-name" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:border-cyan-500 focus:outline-none" placeholder="e.g., Backups_2026" required>
+                </div>
+                <div class="flex justify-end gap-2 pt-2 border-t border-slate-800/80">
+                    <button type="button" onclick="hideCreateFolderModal()" class="bg-slate-800 hover:bg-slate-750 text-slate-300 px-4 py-2 rounded-xl text-sm font-semibold transition-all">Cancel</button>
+                    <button type="submit" class="bg-cyan-500 hover:bg-cyan-600 text-slate-950 font-bold px-5 py-2 rounded-xl text-sm transition-all">Create</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Rename Item Modal -->
+    <div id="rename-item-modal" onclick="if(event.target === this) hideRenameModal()" class="hidden fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+        <div class="glass-card rounded-2xl p-6 w-full max-w-md shadow-2xl space-y-4 border border-slate-800">
+            <h3 class="text-xl font-bold text-white mb-2">Rename Item</h3>
+            <form onsubmit="handleRenameSubmit(event)" class="space-y-4">
+                <input type="hidden" id="rename-source-path">
+                <div>
+                    <label class="block mb-1.5 text-xs font-bold text-slate-400 uppercase">New Name</label>
+                    <input type="text" id="rename-new-name" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:border-cyan-500 focus:outline-none" required>
+                </div>
+                <div class="flex justify-end gap-2 pt-2 border-t border-slate-800/80">
+                    <button type="button" onclick="hideRenameModal()" class="bg-slate-800 hover:bg-slate-750 text-slate-300 px-4 py-2 rounded-xl text-sm font-semibold transition-all">Cancel</button>
+                    <button type="submit" class="bg-cyan-500 hover:bg-cyan-600 text-slate-950 font-bold px-5 py-2 rounded-xl text-sm transition-all">Rename</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- File Preview Modal -->
+    <div id="file-preview-modal" onclick="if(event.target === this) hideFilePreview()" class="hidden fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+        <div class="glass-card rounded-2xl p-6 w-full max-w-3xl shadow-2xl space-y-4 border border-slate-800 max-h-[85vh] flex flex-col">
+            <div class="flex justify-between items-center border-b border-slate-800 pb-3">
+                <div class="flex items-center space-x-2">
+                    <span id="preview-icon" class="text-lg">📄</span>
+                    <h3 class="text-lg font-bold text-white truncate max-w-md" id="preview-filename">File Preview</h3>
+                </div>
+                <div class="flex items-center space-x-2">
+                    <button id="preview-download-btn" class="bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 border border-cyan-500/20 px-3 py-1.5 rounded-lg text-xs font-bold transition-all">Download</button>
+                    <button onclick="hideFilePreview()" class="text-slate-400 hover:text-white text-xl leading-none">&times;</button>
+                </div>
+            </div>
+            <div id="preview-content-area" class="flex-1 overflow-auto rounded-xl bg-slate-950 p-4 border border-slate-900 text-xs font-mono text-slate-300">
+                <!-- Text or Image Preview -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Container Logs Modal -->
+    <div id="container-logs-modal" onclick="if(event.target === this) hideContainerLogs()" class="hidden fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+        <div class="glass-card rounded-2xl p-6 w-full max-w-4xl shadow-2xl space-y-4 border border-slate-800 max-h-[85vh] flex flex-col">
+            <div class="flex justify-between items-center border-b border-slate-800 pb-3">
+                <h3 class="text-lg font-bold text-white flex items-center space-x-2">
+                    <span class="text-cyan-400">🐳</span>
+                    <span id="container-logs-title">Container Runtime Logs</span>
+                </h3>
+                <button onclick="hideContainerLogs()" class="text-slate-400 hover:text-white text-xl leading-none">&times;</button>
+            </div>
+            <pre id="container-logs-content" class="flex-1 overflow-auto rounded-xl bg-slate-950 p-4 border border-slate-900 text-xs font-mono text-emerald-400 leading-relaxed whitespace-pre-wrap"></pre>
+        </div>
+    </div>
+
+    <!-- SignalR Client Library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/8.0.7/signalr.min.js"></script>
     <script src="app.js"></script>
 </body>
 </html>

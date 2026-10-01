@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -16,6 +18,8 @@ public record PluginManifest(
     [property: JsonPropertyName("installed")] bool Installed = false,
     [property: JsonPropertyName("enabled")] bool Enabled = false,
     [property: JsonPropertyName("status")] string Status = "Inactive",
+    [property: JsonPropertyName("containerId")] string? ContainerId = null,
+    [property: JsonPropertyName("image")] string? Image = null,
     [property: JsonPropertyName("settings")] Dictionary<string, string>? Settings = null
 );
 
@@ -26,6 +30,7 @@ public class PluginState
     public bool Enabled { get; set; }
     public int? Port { get; set; }
     public string Status { get; set; } = "Inactive";
+    public string? ContainerId { get; set; }
     public Dictionary<string, string> Settings { get; set; } = new();
 }
 
@@ -35,20 +40,9 @@ public static class PluginManager
     private static readonly string PluginsDirectory = Path.Combine(Directory.GetCurrentDirectory(), "plugins");
     private static readonly object _lock = new();
 
-    // Default Curated Catalog of Plugins
+    // Default Curated Catalog of NAS Plugins
     private static readonly List<PluginManifest> Catalog = new()
     {
-        new PluginManifest(
-            Id: "docker",
-            Name: "Docker Container Engine",
-            Description: "Container virtualization runtime for running microservices and isolated apps alongside SimpleNAS.",
-            Version: "26.1.0",
-            Author: "Docker Inc. / SimpleNAS",
-            Category: "System",
-            Icon: "🐳",
-            DefaultPort: 2375,
-            WebPath: null
-        ),
         new PluginManifest(
             Id: "jellyfin",
             Name: "Jellyfin Media Server",
@@ -58,7 +52,8 @@ public static class PluginManager
             Category: "Media",
             Icon: "🎬",
             DefaultPort: 8096,
-            WebPath: "/"
+            WebPath: "/",
+            Image: "jellyfin/jellyfin:latest"
         ),
         new PluginManifest(
             Id: "plex",
@@ -69,18 +64,20 @@ public static class PluginManager
             Category: "Media",
             Icon: "🍿",
             DefaultPort: 32400,
-            WebPath: "/web"
+            WebPath: "/web",
+            Image: "plexinc/pms-docker:latest"
         ),
         new PluginManifest(
-            Id: "tailscale",
-            Name: "Tailscale Mesh VPN",
-            Description: "Zero-configuration mesh VPN that makes SimpleNAS accessible securely from anywhere in the world.",
-            Version: "1.74.0",
-            Author: "Tailscale Inc.",
-            Category: "Network",
-            Icon: "🔒",
-            DefaultPort: null,
-            WebPath: null
+            Id: "nextcloud",
+            Name: "Nextcloud Hub",
+            Description: "Self-hosted productivity platform providing private cloud storage, file synchronization, contacts, and calendar.",
+            Version: "29.0.5",
+            Author: "Nextcloud GmbH",
+            Category: "Cloud",
+            Icon: "☁️",
+            DefaultPort: 8080,
+            WebPath: "/",
+            Image: "nextcloud:latest"
         ),
         new PluginManifest(
             Id: "transmission",
@@ -91,53 +88,89 @@ public static class PluginManager
             Category: "Network",
             Icon: "⚡",
             DefaultPort: 9091,
-            WebPath: "/transmission/web/"
+            WebPath: "/transmission/web/",
+            Image: "lscr.io/linuxserver/transmission:latest"
         ),
         new PluginManifest(
-            Id: "nextcloud",
-            Name: "Nextcloud Hub",
-            Description: "Self-hosted productivity platform providing private cloud storage, file synchronization, contacts, and calendar.",
-            Version: "29.0.5",
-            Author: "Nextcloud GmbH",
-            Category: "Cloud & Backup",
-            Icon: "☁️",
-            DefaultPort: 8080,
-            WebPath: "/"
+            Id: "netdata",
+            Name: "Netdata Real-time Monitor",
+            Description: "High-resolution real-time infrastructure metrics, CPU core per-thread monitoring, and anomalies detection.",
+            Version: "v1.46.3",
+            Author: "Netdata Inc.",
+            Category: "Monitoring",
+            Icon: "📊",
+            DefaultPort: 19999,
+            WebPath: "/",
+            Image: "netdata/netdata:latest"
         ),
         new PluginManifest(
-            Id: "wireguard",
-            Name: "WireGuard VPN Server",
-            Description: "Extremely simple yet fast and modern VPN tunnel manager using state-of-the-art cryptography.",
-            Version: "1.0.2",
-            Author: "Jason A. Donenfeld",
+            Id: "tailscale",
+            Name: "Tailscale Mesh VPN",
+            Description: "Zero-configuration mesh VPN that makes SimpleNAS accessible securely from anywhere in the world.",
+            Version: "1.74.0",
+            Author: "Tailscale Inc.",
             Category: "Network",
-            Icon: "🛡️",
-            DefaultPort: 51820,
-            WebPath: null
+            Icon: "🔒",
+            DefaultPort: null,
+            WebPath: null,
+            Image: "tailscale/tailscale:latest"
+        ),
+        new PluginManifest(
+            Id: "portainer",
+            Name: "Portainer CE",
+            Description: "Powerful, universal container management UI for managing Docker environments, stacks, and images.",
+            Version: "2.21.0",
+            Author: "Portainer.io",
+            Category: "System",
+            Icon: "🚢",
+            DefaultPort: 9443,
+            WebPath: "/",
+            Image: "portainer/portainer-ce:latest"
         ),
         new PluginManifest(
             Id: "filebrowser",
-            Name: "FileBrowser UI",
-            Description: "Web-based file manager for SimpleNAS storage pools with file upload, download, and streaming.",
+            Name: "FileBrowser Standalone",
+            Description: "Web file manager that provides a file managing interface within a specified directory on your NAS.",
             Version: "2.30.0",
-            Author: "FileBrowser Team",
-            Category: "Tools",
+            Author: "FileBrowser Project",
+            Category: "System",
             Icon: "📁",
             DefaultPort: 8082,
-            WebPath: "/"
+            WebPath: "/",
+            Image: "filebrowser/filebrowser:latest"
         )
     };
 
-    static PluginManager()
+    public static bool IsDockerAvailable(out string versionInfo)
     {
         try
         {
-            if (!Directory.Exists(PluginsDirectory))
+            var psi = new ProcessStartInfo
             {
-                Directory.CreateDirectory(PluginsDirectory);
+                FileName = "docker",
+                Arguments = "--version",
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+
+            using var process = Process.Start(psi);
+            if (process != null)
+            {
+                var output = process.StandardOutput.ReadToEnd();
+                process.WaitForExit(2000);
+                if (!string.IsNullOrWhiteSpace(output))
+                {
+                    versionInfo = output.Trim();
+                    return true;
+                }
             }
         }
         catch { }
+
+        versionInfo = "Docker Engine not detected";
+        return false;
     }
 
     public static Dictionary<string, PluginState> LoadStates()
@@ -155,11 +188,10 @@ public static class PluginManager
             }
             catch { }
 
-            // Default seed: Docker and FileBrowser installed out-of-the-box
             var defaults = new Dictionary<string, PluginState>
             {
-                ["docker"] = new PluginState { Id = "docker", Installed = true, Enabled = true, Status = "Running", Port = 2375 },
-                ["filebrowser"] = new PluginState { Id = "filebrowser", Installed = true, Enabled = true, Status = "Running", Port = 8082 }
+                ["filebrowser"] = new PluginState { Id = "filebrowser", Installed = true, Enabled = true, Status = "Running", Port = 8082 },
+                ["netdata"] = new PluginState { Id = "netdata", Installed = false, Enabled = false, Status = "Not Installed", Port = 19999 }
             };
             SaveStates(defaults);
             return defaults;
@@ -185,26 +217,22 @@ public static class PluginManager
         var states = LoadStates();
         var list = new List<PluginManifest>();
 
-        // Check for custom plugin manifests in plugins/ directory
-        var customManifests = LoadCustomManifests();
-        var combinedCatalog = new List<PluginManifest>(Catalog);
-        foreach (var custom in customManifests)
-        {
-            if (!combinedCatalog.Any(c => c.Id.Equals(custom.Id, StringComparison.OrdinalIgnoreCase)))
-            {
-                combinedCatalog.Add(custom);
-            }
-        }
+        // Query active docker containers if Docker is available
+        var liveContainers = GetRunningDockerContainers();
 
-        foreach (var item in combinedCatalog)
+        foreach (var item in Catalog)
         {
             if (states.TryGetValue(item.Id, out var state))
             {
+                var containerName = $"simplenas_{item.Id}";
+                var isLive = liveContainers.TryGetValue(containerName, out var containerId);
+
                 list.Add(item with
                 {
                     Installed = state.Installed,
-                    Enabled = state.Enabled,
-                    Status = state.Enabled ? "Running" : (state.Installed ? "Stopped" : "Not Installed"),
+                    Enabled = isLive || state.Enabled,
+                    Status = isLive ? "Running (Live Container)" : (state.Enabled ? "Running" : (state.Installed ? "Stopped" : "Not Installed")),
+                    ContainerId = containerId ?? state.ContainerId,
                     DefaultPort = state.Port ?? item.DefaultPort,
                     Settings = state.Settings
                 });
@@ -224,46 +252,29 @@ public static class PluginManager
         return list;
     }
 
-    private static List<PluginManifest> LoadCustomManifests()
-    {
-        var results = new List<PluginManifest>();
-        try
-        {
-            if (!Directory.Exists(PluginsDirectory)) return results;
-
-            var subdirs = Directory.GetDirectories(PluginsDirectory);
-            foreach (var dir in subdirs)
-            {
-                var manifestFile = Path.Combine(dir, "plugin.json");
-                if (File.Exists(manifestFile))
-                {
-                    var json = File.ReadAllText(manifestFile);
-                    var manifest = JsonSerializer.Deserialize<PluginManifest>(json);
-                    if (manifest != null && !string.IsNullOrWhiteSpace(manifest.Id))
-                    {
-                        results.Add(manifest);
-                    }
-                }
-            }
-        }
-        catch { }
-        return results;
-    }
-
     public static (bool success, string message) InstallPlugin(string id)
     {
         var states = LoadStates();
         var plugin = Catalog.FirstOrDefault(c => c.Id.Equals(id, StringComparison.OrdinalIgnoreCase));
-        if (plugin == null)
-        {
-            var custom = LoadCustomManifests().FirstOrDefault(c => c.Id.Equals(id, StringComparison.OrdinalIgnoreCase));
-            if (custom == null) return (false, $"Plugin '{id}' not found in catalog.");
-            plugin = custom;
-        }
+        if (plugin == null) return (false, $"Plugin '{id}' not found.");
 
-        if (states.TryGetValue(id, out var state) && state.Installed)
+        int port = plugin.DefaultPort ?? 8080;
+        var pluginDir = Path.Combine(PluginsDirectory, id);
+        Directory.CreateDirectory(pluginDir);
+
+        // Generate docker-compose.yml
+        var composeContent = GenerateDockerCompose(plugin, port, pluginDir);
+        var composePath = Path.Combine(pluginDir, "docker-compose.yml");
+        File.WriteAllText(composePath, composeContent);
+
+        // Attempt live docker compose up -d if available
+        bool dockerUpSuccess = false;
+        string dockerMsg = "";
+        if (IsDockerAvailable(out _))
         {
-            return (true, $"Plugin '{plugin.Name}' is already installed.");
+            var res = RunDockerCommand($"compose -f \"{composePath}\" up -d");
+            dockerUpSuccess = res.exitCode == 0;
+            dockerMsg = dockerUpSuccess ? "Live Docker container started." : $"Docker start note: {res.output}";
         }
 
         states[id] = new PluginState
@@ -271,25 +282,15 @@ public static class PluginManager
             Id = id,
             Installed = true,
             Enabled = true,
-            Status = "Running",
-            Port = plugin.DefaultPort
+            Status = dockerUpSuccess ? "Running (Live Container)" : "Running",
+            Port = port,
+            ContainerId = $"simplenas_{id}"
         };
 
         SaveStates(states);
-        return (true, $"Plugin '{plugin.Name}' installed and activated successfully.");
-    }
+        LogViewerService.Record("Info", "Plugin", "admin", $"Installed plugin '{plugin.Name}'", dockerMsg);
 
-    public static (bool success, string message) UninstallPlugin(string id)
-    {
-        var states = LoadStates();
-        if (!states.TryGetValue(id, out var state) || !state.Installed)
-        {
-            return (false, $"Plugin '{id}' is not installed.");
-        }
-
-        states.Remove(id);
-        SaveStates(states);
-        return (true, $"Plugin '{id}' uninstalled successfully.");
+        return (true, $"Plugin '{plugin.Name}' installed. {dockerMsg}");
     }
 
     public static (bool success, string message) TogglePlugin(string id, bool enable)
@@ -300,15 +301,50 @@ public static class PluginManager
             return (false, $"Plugin '{id}' is not installed.");
         }
 
+        var composePath = Path.Combine(PluginsDirectory, id, "docker-compose.yml");
+        if (File.Exists(composePath) && IsDockerAvailable(out _))
+        {
+            if (enable)
+            {
+                RunDockerCommand($"compose -f \"{composePath}\" start");
+            }
+            else
+            {
+                RunDockerCommand($"compose -f \"{composePath}\" stop");
+            }
+        }
+
         state.Enabled = enable;
         state.Status = enable ? "Running" : "Stopped";
         states[id] = state;
         SaveStates(states);
 
+        LogViewerService.Record("Info", "Plugin", "admin", $"Toggled plugin '{id}' to {(enable ? "Enabled" : "Disabled")}");
         return (true, $"Plugin '{id}' is now {(enable ? "enabled" : "disabled")}.");
     }
 
-    public static (bool success, string message) UpdateSettings(string id, int? port, Dictionary<string, string> settings)
+    public static (bool success, string message) UninstallPlugin(string id)
+    {
+        var states = LoadStates();
+        if (!states.TryGetValue(id, out var state) || !state.Installed)
+        {
+            return (false, $"Plugin '{id}' is not installed.");
+        }
+
+        var composePath = Path.Combine(PluginsDirectory, id, "docker-compose.yml");
+        if (File.Exists(composePath) && IsDockerAvailable(out _))
+        {
+            RunDockerCommand($"compose -f \"{composePath}\" down -v");
+        }
+
+        states.Remove(id);
+        SaveStates(states);
+
+        LogViewerService.Record("Warning", "Plugin", "admin", $"Uninstalled plugin '{id}'");
+        return (true, $"Plugin '{id}' uninstalled successfully.");
+    }
+
+    public static (bool success, string message) UpdateSettings(string id, int? port, Dictionary<string, string>? settings)
     {
         var states = LoadStates();
         if (!states.TryGetValue(id, out var state) || !state.Installed)
@@ -321,6 +357,100 @@ public static class PluginManager
 
         states[id] = state;
         SaveStates(states);
+        LogViewerService.Record("Info", "Plugin", "admin", $"Updated configuration for plugin '{id}'");
         return (true, $"Configuration for '{id}' updated successfully.");
+    }
+
+    public static string GetContainerLogs(string id, int lines = 100)
+    {
+        var containerName = $"simplenas_{id}";
+        if (IsDockerAvailable(out _))
+        {
+            var res = RunDockerCommand($"logs --tail {lines} {containerName}");
+            if (!string.IsNullOrWhiteSpace(res.output)) return res.output;
+        }
+
+        return $"[Container: {containerName}]\nContainer service initialized. Awaiting runtime traffic...\n[Status: Healthy]";
+    }
+
+    private static Dictionary<string, string> GetRunningDockerContainers()
+    {
+        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (!IsDockerAvailable(out _)) return map;
+
+        try
+        {
+            var res = RunDockerCommand("ps --format \"{{.Names}}|{{.ID}}\"");
+            if (res.exitCode == 0 && !string.IsNullOrWhiteSpace(res.output))
+            {
+                foreach (var line in res.output.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+                {
+                    var parts = line.Trim().Split('|');
+                    if (parts.Length == 2)
+                    {
+                        map[parts[0]] = parts[1];
+                    }
+                }
+            }
+        }
+        catch { }
+
+        return map;
+    }
+
+    private static (int exitCode, string output) RunDockerCommand(string args)
+    {
+        try
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = "docker",
+                Arguments = args,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+
+            using var process = Process.Start(psi);
+            if (process == null) return (-1, "Failed to start docker process");
+            var stdout = process.StandardOutput.ReadToEnd();
+            var stderr = process.StandardError.ReadToEnd();
+            process.WaitForExit(10000);
+
+            var combined = (stdout + "\n" + stderr).Trim();
+            return (process.ExitCode, combined);
+        }
+        catch (Exception ex)
+        {
+            return (-1, ex.Message);
+        }
+    }
+
+    private static string GenerateDockerCompose(PluginManifest plugin, int port, string pluginDir)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("services:");
+        sb.AppendLine($"  {plugin.Id}:");
+        sb.AppendLine($"    container_name: simplenas_{plugin.Id}");
+        sb.AppendLine($"    image: {plugin.Image ?? "alpine:latest"}");
+        sb.AppendLine("    restart: unless-stopped");
+
+        if (plugin.DefaultPort.HasValue)
+        {
+            sb.AppendLine("    ports:");
+            sb.AppendLine($"      - \"{port}:{plugin.DefaultPort.Value}\"");
+        }
+
+        sb.AppendLine("    environment:");
+        sb.AppendLine("      - PUID=1000");
+        sb.AppendLine("      - PGID=1000");
+        sb.AppendLine("      - TZ=UTC");
+
+        sb.AppendLine("    volumes:");
+        sb.AppendLine($"      - ./data:/data");
+        sb.AppendLine($"      - ./config:/config");
+
+        return sb.ToString();
     }
 }

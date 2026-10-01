@@ -38,6 +38,13 @@ function showTab(tabName) {
         case 'plugins':
             loadPlugins();
             break;
+        case 'files':
+            loadFileRoots();
+            loadFiles(window.currentBrowserPath || '');
+            break;
+        case 'logs':
+            loadLogs();
+            break;
     }
 }
 
@@ -161,8 +168,13 @@ async function controlService(name, action) {
 // ZFS Pools
 async function loadZFSPools() {
     try {
-        const response = await fetch(`${API_BASE}/zfs/pools`);
-        const data = await response.json();
+        const [poolsResp, smartResp] = await Promise.all([
+            fetch(`${API_BASE}/zfs/pools`),
+            fetch(`${API_BASE}/storage/smart`).catch(() => null)
+        ]);
+
+        const data = await poolsResp.json();
+        const smartReports = smartResp && smartResp.ok ? await smartResp.json() : [];
         
         const poolsList = document.getElementById('pools-list');
         poolsList.innerHTML = '';
@@ -172,11 +184,26 @@ async function loadZFSPools() {
             return;
         }
         
-        data.pools.forEach(pool => {
+        data.pools.forEach((pool, idx) => {
             const isOnline = pool.health === 'ONLINE';
             const healthClass = isOnline ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20' : 'text-rose-400 bg-rose-500/10 border-rose-500/20';
-            const isWindowsDrive = pool.name.startsWith('Windows_') || pool.name.startsWith('Drive_');
+            const isWindowsDrive = pool.name.startsWith('Windows_') || pool.name.startsWith('Drive_') || pool.name.startsWith('Google_');
             
+            // Find SMART record
+            const cleanPoolName = pool.name.replace('Windows_', '').replace('Drive_', '').replace('Google_Drive_', '');
+            const smart = (smartReports && smartReports.length > 0) 
+                ? (smartReports.find(s => s.deviceId.includes(cleanPoolName) || s.model.includes(cleanPoolName)) || smartReports[idx % smartReports.length])
+                : null;
+
+            const smartHtml = smart ? `
+                <div class="flex flex-wrap items-center gap-1.5 pt-1.5 text-[11px] font-mono">
+                    <span class="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">S.M.A.R.T: ${smart.healthStatus}</span>
+                    <span class="px-2 py-0.5 rounded bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">🔥 ${smart.temperatureC}°C</span>
+                    <span class="px-2 py-0.5 rounded bg-purple-500/10 text-purple-400 border border-purple-500/20">${smart.mediaType}</span>
+                    <span class="text-slate-500 text-[10px] hidden sm:inline">Hours: ${smart.powerOnHours}h</span>
+                </div>
+            ` : '';
+
             const actionsHtml = isWindowsDrive
                 ? `<button onclick="alert('Host drive volume ${pool.name} is active and online with full NTFS/Windows integrity.')" class="bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 border border-cyan-500/20 text-[10px] font-bold px-3 py-1.5 rounded-lg transition-all">Volume Status: Active</button>`
                 : `<button onclick="scrubPool('${pool.name}')" class="bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 border border-cyan-500/20 text-[10px] font-bold px-3 py-1.5 rounded-lg transition-all">Scrub Pool</button>
@@ -188,6 +215,7 @@ async function loadZFSPools() {
                         <div>
                             <h4 class="text-lg font-bold text-white">${pool.name}</h4>
                             <p class="text-xs text-slate-400">Total Capacity: ${pool.size}</p>
+                            ${smartHtml}
                         </div>
                         <span class="text-xs font-semibold px-2.5 py-1 rounded-lg border ${healthClass}">${pool.health}</span>
                     </div>
@@ -1387,15 +1415,18 @@ async function handleLogout() {
 // Initialize - check auth first
 document.addEventListener('DOMContentLoaded', async () => {
     await checkAuth();
+    initSignalR();
     
-    // Auto-refresh dashboard every 5 seconds
+    // Auto-refresh fallback every 10 seconds if SignalR is idle
     setInterval(() => {
         const loginScreen = document.getElementById('login-screen');
         const dashboardTab = document.getElementById('tab-dashboard');
         if (loginScreen && loginScreen.classList.contains('hidden') && dashboardTab && !dashboardTab.classList.contains('hidden')) {
-            loadDashboard();
+            if (!nasHubConnection || nasHubConnection.state !== 'Connected') {
+                loadDashboard();
+            }
         }
-    }, 5000);
+    }, 10000);
 });
 
 // Cloud Storage Manager
@@ -1907,6 +1938,9 @@ function renderPlugins() {
                                         <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path></svg>
                                     </a>
                                 ` : ''}
+                                <button onclick="showContainerLogs('${plugin.id}', '${plugin.name}')" class="bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs px-2.5 py-1.5 rounded-lg border border-slate-700 transition-all" title="View Container Logs">
+                                    📋
+                                </button>
                                 <button onclick="openPluginConfig('${plugin.id}')" class="bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs px-2.5 py-1.5 rounded-lg border border-slate-700 transition-all" title="Settings">
                                     ⚙️
                                 </button>
@@ -2033,5 +2067,727 @@ async function savePluginConfig(event) {
         alert(`Error: ${e.message}`);
     }
 }
+
+// ==================== REAL-TIME SIGNALR TELEMETRY & TOASTS ====================
+let nasHubConnection = null;
+
+function initSignalR() {
+    if (typeof signalR === 'undefined') {
+        console.warn('SignalR library not loaded, skipping real-time socket connection.');
+        return;
+    }
+    
+    if (nasHubConnection && nasHubConnection.state === signalR.HubConnectionState.Connected) {
+        return;
+    }
+
+    nasHubConnection = new signalR.HubConnectionBuilder()
+        .withUrl('/hubs/nas')
+        .withAutomaticReconnect([0, 2000, 5000, 10000, 30000])
+        .configureLogging(signalR.LogLevel.Warning)
+        .build();
+
+    nasHubConnection.on('ReceiveTelemetry', (telemetry) => {
+        if (!telemetry) return;
+
+        // CPU Usage
+        if (telemetry.cpu && typeof telemetry.cpu.percent === 'number') {
+            const cpuEl = document.getElementById('cpu-usage');
+            if (cpuEl) cpuEl.textContent = `${telemetry.cpu.percent.toFixed(0)}%`;
+            if (typeof setProgress === 'function') setProgress('cpu', telemetry.cpu.percent);
+            const cpuDet = document.getElementById('cpu-core-details');
+            if (cpuDet) cpuDet.textContent = `Sys Load Avg: ${telemetry.cpu.percent.toFixed(1)}%`;
+        }
+
+        // Memory Usage
+        if (telemetry.memory && typeof telemetry.memory.percent === 'number') {
+            const memEl = document.getElementById('mem-usage');
+            if (memEl) memEl.textContent = `${telemetry.memory.percent.toFixed(0)}%`;
+            if (typeof setProgress === 'function') setProgress('mem', telemetry.memory.percent);
+            const memDet = document.getElementById('mem-ram-details');
+            if (memDet) memDet.textContent = `RAM Allocation: ${telemetry.memory.percent.toFixed(1)}%`;
+        }
+
+        // Disk Usage
+        if (telemetry.disk && telemetry.disk.percent) {
+            const diskPercent = parseFloat(telemetry.disk.percent.replace('%', '')) || 0;
+            const diskEl = document.getElementById('disk-usage');
+            if (diskEl) diskEl.textContent = `${diskPercent.toFixed(0)}%`;
+            if (typeof setProgress === 'function') setProgress('disk', diskPercent);
+            const diskDet = document.getElementById('disk-pool-details');
+            if (diskDet) diskDet.textContent = `Root Space Used: ${telemetry.disk.percent}`;
+        }
+    });
+
+    nasHubConnection.on('ReceiveAlert', (alertData) => {
+        if (alertData) {
+            showToast(alertData.title || 'SimpleNAS Alert', alertData.message || '', alertData.level || 'info');
+        }
+    });
+
+    nasHubConnection.start()
+        .then(() => {
+            console.log('Connected to SimpleNAS SignalR Telemetry Hub');
+        })
+        .catch(err => {
+            console.warn('SignalR initial connection failed, will use HTTP polling fallback:', err);
+        });
+}
+
+function showToast(title, message, level = 'info') {
+    const container = document.getElementById('toast-container');
+    if (!container) return;
+
+    const toast = document.createElement('div');
+    const colors = {
+        info: 'bg-slate-900/90 border-cyan-500/40 text-cyan-300',
+        success: 'bg-slate-900/90 border-emerald-500/40 text-emerald-300',
+        warning: 'bg-slate-900/90 border-amber-500/40 text-amber-300',
+        error: 'bg-slate-900/90 border-rose-500/40 text-rose-300',
+        security: 'bg-purple-950/90 border-purple-500/40 text-purple-300'
+    };
+    const icons = {
+        info: 'ℹ️',
+        success: '✅',
+        warning: '⚠️',
+        error: '❌',
+        security: '🛡️'
+    };
+
+    const colorClass = colors[level.toLowerCase()] || colors.info;
+    const icon = icons[level.toLowerCase()] || icons.info;
+
+    toast.className = `pointer-events-auto p-3.5 rounded-xl border shadow-2xl backdrop-blur-md flex items-start space-x-3 max-w-sm transition-all duration-300 transform translate-y-2 opacity-0 ${colorClass}`;
+    toast.innerHTML = `
+        <span class="text-base">${icon}</span>
+        <div class="flex-1 text-xs">
+            <div class="font-bold text-white mb-0.5">${escapeHtml(title)}</div>
+            <div class="text-slate-300 leading-relaxed">${escapeHtml(message)}</div>
+        </div>
+        <button onclick="this.parentElement.remove()" class="text-slate-400 hover:text-white text-xs">&times;</button>
+    `;
+
+    container.appendChild(toast);
+
+    setTimeout(() => {
+        toast.classList.remove('translate-y-2', 'opacity-0');
+    }, 10);
+
+    setTimeout(() => {
+        if (toast.parentElement) {
+            toast.classList.add('opacity-0', 'translate-y-2');
+            setTimeout(() => toast.remove(), 300);
+        }
+    }, 5000);
+}
+
+// ==================== WEB FILE EXPLORER ====================
+window.currentBrowserPath = '';
+window.allFileItems = [];
+
+async function loadFileRoots() {
+    try {
+        const response = await fetch(`${API_BASE}/files/roots`);
+        if (!response.ok) return;
+        const roots = await response.json();
+        const rootsBar = document.getElementById('file-roots-bar');
+        if (!rootsBar) return;
+
+        let html = '<span class="text-xs font-mono uppercase text-slate-500 mr-1">Root Storage:</span>';
+        roots.forEach(root => {
+            const isSelected = window.currentBrowserPath.startsWith(root);
+            const activeStyle = isSelected
+                ? 'bg-cyan-500/20 text-cyan-400 border-cyan-500/40 font-bold'
+                : 'bg-slate-800/80 hover:bg-slate-700 text-slate-300 border-slate-700';
+            html += `
+                <button onclick="loadFiles('${encodeURIComponent(root)}')" class="px-2.5 py-1 text-xs font-mono rounded-lg border transition-all ${activeStyle}">
+                    💾 ${root}
+                </button>
+            `;
+        });
+        rootsBar.innerHTML = html;
+
+        if (!window.currentBrowserPath && roots.length > 0) {
+            loadFiles(roots[0]);
+        }
+    } catch (e) {
+        console.error('Error loading file roots:', e);
+    }
+}
+
+async function loadFiles(path = '') {
+    const decodedPath = decodeURIComponent(path);
+    window.currentBrowserPath = decodedPath;
+    const tbody = document.getElementById('files-table-body');
+    if (tbody) {
+        tbody.innerHTML = '<tr><td colspan="4" class="py-12 text-center text-slate-500 font-sans">Loading directory...</td></tr>';
+    }
+
+    try {
+        const url = decodedPath ? `${API_BASE}/files/list?path=${encodeURIComponent(decodedPath)}` : `${API_BASE}/files/list`;
+        const response = await fetch(url);
+        if (!response.ok) {
+            const err = await response.json();
+            if (tbody) {
+                tbody.innerHTML = `<tr><td colspan="4" class="py-8 text-center text-rose-400 font-sans">Failed to load directory: ${err.error || 'Access denied'}</td></tr>`;
+            }
+            return;
+        }
+
+        const data = await response.json();
+        window.currentBrowserPath = data.currentPath;
+        window.allFileItems = data.items || [];
+
+        renderBreadcrumbs(data.breadcrumbs || [data.currentPath], data.parentPath);
+        renderFilesTable(window.allFileItems);
+        loadFileRoots();
+    } catch (e) {
+        if (tbody) {
+            tbody.innerHTML = `<tr><td colspan="4" class="py-8 text-center text-rose-400 font-sans">Error: ${e.message}</td></tr>`;
+        }
+    }
+}
+
+function renderBreadcrumbs(breadcrumbs, parentPath) {
+    const container = document.getElementById('file-breadcrumbs');
+    if (!container) return;
+
+    let html = '';
+    if (parentPath) {
+        html += `
+            <button onclick="loadFiles('${encodeURIComponent(parentPath)}')" class="hover:text-cyan-400 text-slate-400 flex items-center space-x-1" title="Go up to parent directory">
+                <span>📁 ..</span>
+            </button>
+            <span class="text-slate-600">/</span>
+        `;
+    }
+
+    let accumulatedPath = '';
+    breadcrumbs.forEach((segment, idx) => {
+        if (idx === 0) {
+            accumulatedPath = segment;
+        } else {
+            const separator = accumulatedPath.includes('\\') ? '\\' : '/';
+            accumulatedPath = accumulatedPath.endsWith(separator) ? accumulatedPath + segment : accumulatedPath + separator + segment;
+        }
+        const isLast = idx === breadcrumbs.length - 1;
+        if (isLast) {
+            html += `<span class="text-cyan-400 font-bold">${escapeHtml(segment)}</span>`;
+        } else {
+            html += `
+                <button onclick="loadFiles('${encodeURIComponent(accumulatedPath)}')" class="hover:text-cyan-400 text-slate-400 transition-colors">
+                    ${escapeHtml(segment)}
+                </button>
+                <span class="text-slate-600">/</span>
+            `;
+        }
+    });
+
+    container.innerHTML = html;
+}
+
+function getFileIcon(item) {
+    if (item.isDirectory) return '📁';
+    switch (item.typeCategory) {
+        case 'image': return '🖼️';
+        case 'video': return '🎬';
+        case 'audio': return '🎵';
+        case 'archive': return '📦';
+        case 'code': return '💻';
+        case 'document': return '📄';
+        default: return '📄';
+    }
+}
+
+function renderFilesTable(items) {
+    const tbody = document.getElementById('files-table-body');
+    if (!tbody) return;
+
+    if (!items || items.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="4" class="py-12 text-center text-slate-500 font-sans">Directory is empty. Drag and drop files or create a folder.</td></tr>';
+        return;
+    }
+
+    const sorted = [...items].sort((a, b) => {
+        if (a.isDirectory && !b.isDirectory) return -1;
+        if (!a.isDirectory && b.isDirectory) return 1;
+        return a.name.localeCompare(b.name);
+    });
+
+    let html = '';
+    sorted.forEach(item => {
+        const icon = getFileIcon(item);
+        const dateStr = item.lastModified ? new Date(item.lastModified).toLocaleString() : '-';
+        const isTextOrCode = ['code', 'document'].includes(item.typeCategory) || ['.txt', '.log', '.json', '.yaml', '.yml', '.conf', '.sh', '.cs', '.js', '.html', '.css', '.md'].some(ext => item.name.toLowerCase().endsWith(ext));
+        const isImage = item.typeCategory === 'image';
+
+        const clickAction = item.isDirectory
+            ? `loadFiles('${encodeURIComponent(item.fullPath)}')`
+            : (isTextOrCode || isImage ? `previewFile('${encodeURIComponent(item.fullPath)}', '${escapeHtml(item.name)}', ${isImage})` : `downloadFile('${encodeURIComponent(item.fullPath)}')`);
+
+        html += `
+            <tr class="hover:bg-slate-900/60 transition-colors group">
+                <td class="py-3 pl-3">
+                    <div class="flex items-center space-x-2.5 cursor-pointer select-none" onclick="${clickAction}">
+                        <span class="text-lg">${icon}</span>
+                        <span class="font-medium text-slate-200 group-hover:text-cyan-400 transition-colors truncate max-w-xs sm:max-w-md" title="${escapeHtml(item.name)}">
+                            ${escapeHtml(item.name)}
+                        </span>
+                    </div>
+                </td>
+                <td class="py-3 text-right text-slate-400 font-mono text-xs">
+                    ${item.isDirectory ? '<span class="text-slate-600">—</span>' : item.sizeFormatted}
+                </td>
+                <td class="py-3 pl-6 text-slate-500 text-xs">
+                    ${dateStr}
+                </td>
+                <td class="py-3 pr-3 text-right">
+                    <div class="flex items-center justify-end space-x-1">
+                        ${!item.isDirectory ? `
+                            <button onclick="downloadFile('${encodeURIComponent(item.fullPath)}')" class="p-1.5 rounded-lg bg-slate-800/80 hover:bg-cyan-500/20 text-slate-300 hover:text-cyan-400 border border-slate-700 hover:border-cyan-500/30 transition-all" title="Download File">
+                                ⬇️
+                            </button>
+                        ` : ''}
+                        <button onclick="showRenameModal('${encodeURIComponent(item.fullPath)}', '${escapeHtml(item.name)}')" class="p-1.5 rounded-lg bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 transition-all" title="Rename">
+                            ✏️
+                        </button>
+                        <button onclick="deleteFileItem('${encodeURIComponent(item.fullPath)}', '${escapeHtml(item.name)}')" class="p-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 transition-all" title="Delete">
+                            🗑️
+                        </button>
+                    </div>
+                </td>
+            </tr>
+        `;
+    });
+
+    tbody.innerHTML = html;
+}
+
+function filterFileList(event) {
+    const query = (event ? event.target.value : '').toLowerCase().trim();
+    if (!query) {
+        renderFilesTable(window.allFileItems);
+        return;
+    }
+    const filtered = window.allFileItems.filter(item => item.name.toLowerCase().includes(query));
+    renderFilesTable(filtered);
+}
+
+function downloadFile(encodedPath) {
+    const path = decodeURIComponent(encodedPath);
+    window.location.href = `${API_BASE}/files/download?path=${encodeURIComponent(path)}`;
+}
+
+async function previewFile(encodedPath, filename, isImage) {
+    const path = decodeURIComponent(encodedPath);
+    const modal = document.getElementById('file-preview-modal');
+    const titleEl = document.getElementById('preview-filename');
+    const contentArea = document.getElementById('preview-content-area');
+    const downloadBtn = document.getElementById('preview-download-btn');
+    const iconEl = document.getElementById('preview-icon');
+
+    if (!modal || !contentArea) return;
+
+    titleEl.textContent = filename;
+    iconEl.textContent = isImage ? '🖼️' : '📄';
+    downloadBtn.onclick = () => downloadFile(encodedPath);
+    contentArea.innerHTML = '<p class="text-slate-500 text-center py-8">Loading preview...</p>';
+    modal.classList.remove('hidden');
+
+    if (isImage) {
+        contentArea.innerHTML = `
+            <div class="flex items-center justify-center p-4">
+                <img src="${API_BASE}/files/download?path=${encodeURIComponent(path)}" alt="${escapeHtml(filename)}" class="max-w-full max-h-[60vh] object-contain rounded-lg border border-slate-800 shadow-xl">
+            </div>
+        `;
+        return;
+    }
+
+    try {
+        const response = await fetch(`${API_BASE}/files/preview?path=${encodeURIComponent(path)}`);
+        if (response.ok) {
+            const data = await response.json();
+            contentArea.innerHTML = `<pre class="text-slate-300 font-mono text-xs whitespace-pre-wrap leading-relaxed overflow-x-auto">${escapeHtml(data.content)}</pre>`;
+        } else {
+            contentArea.innerHTML = '<p class="text-rose-400 text-center py-8">Unable to preview file. File may be binary or access denied.</p>';
+        }
+    } catch (e) {
+        contentArea.innerHTML = `<p class="text-rose-400 text-center py-8">Error: ${e.message}</p>`;
+    }
+}
+
+function hideFilePreview() {
+    const modal = document.getElementById('file-preview-modal');
+    if (modal) modal.classList.add('hidden');
+}
+
+// Folder creation
+function showCreateFolderModal() {
+    document.getElementById('new-folder-name').value = '';
+    document.getElementById('create-folder-modal').classList.remove('hidden');
+    document.getElementById('new-folder-name').focus();
+}
+
+function hideCreateFolderModal() {
+    document.getElementById('create-folder-modal').classList.add('hidden');
+}
+
+async function handleCreateFolderSubmit(e) {
+    e.preventDefault();
+    const folderName = document.getElementById('new-folder-name').value.trim();
+    if (!folderName) return;
+
+    try {
+        const response = await fetch(`${API_BASE}/files/mkdir`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ parentDir: window.currentBrowserPath, name: folderName })
+        });
+        if (response.ok) {
+            hideCreateFolderModal();
+            showToast('Folder Created', `Directory '${folderName}' created successfully.`, 'success');
+            loadFiles(window.currentBrowserPath);
+        } else {
+            const err = await response.json();
+            alert(`Failed to create folder: ${err.error || 'Unknown error'}`);
+        }
+    } catch (err) {
+        alert(`Error: ${err.message}`);
+    }
+}
+
+// Rename Item
+function showRenameModal(encodedPath, currentName) {
+    const path = decodeURIComponent(encodedPath);
+    document.getElementById('rename-source-path').value = path;
+    document.getElementById('rename-new-name').value = currentName;
+    document.getElementById('rename-item-modal').classList.remove('hidden');
+    document.getElementById('rename-new-name').focus();
+}
+
+function hideRenameModal() {
+    document.getElementById('rename-item-modal').classList.add('hidden');
+}
+
+async function handleRenameSubmit(e) {
+    e.preventDefault();
+    const sourcePath = document.getElementById('rename-source-path').value;
+    const newName = document.getElementById('rename-new-name').value.trim();
+    if (!sourcePath || !newName) return;
+
+    try {
+        const response = await fetch(`${API_BASE}/files/rename`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sourcePath, newName })
+        });
+        if (response.ok) {
+            hideRenameModal();
+            showToast('Renamed', `Item renamed to '${newName}'.`, 'success');
+            loadFiles(window.currentBrowserPath);
+        } else {
+            const err = await response.json();
+            alert(`Failed to rename item: ${err.error || 'Unknown error'}`);
+        }
+    } catch (err) {
+        alert(`Error: ${err.message}`);
+    }
+}
+
+// Delete Item
+async function deleteFileItem(encodedPath, itemName) {
+    const path = decodeURIComponent(encodedPath);
+    if (!confirm(`Are you sure you want to permanently delete "${itemName}"?`)) return;
+
+    try {
+        const response = await fetch(`${API_BASE}/files/delete`, {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ path })
+        });
+        if (response.ok) {
+            showToast('Item Deleted', `"${itemName}" was removed.`, 'warning');
+            loadFiles(window.currentBrowserPath);
+        } else {
+            const err = await response.json();
+            alert(`Failed to delete item: ${err.error || 'Unknown error'}`);
+        }
+    } catch (err) {
+        alert(`Error: ${err.message}`);
+    }
+}
+
+// Drag & Drop / Upload
+function handleDragOver(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    const zone = document.getElementById('file-dropzone');
+    if (zone) zone.classList.add('border-cyan-500', 'bg-cyan-500/5');
+}
+
+function handleDragLeave(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    const zone = document.getElementById('file-dropzone');
+    if (zone) zone.classList.remove('border-cyan-500', 'bg-cyan-500/5');
+}
+
+function handleFileDrop(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    const zone = document.getElementById('file-dropzone');
+    if (zone) zone.classList.remove('border-cyan-500', 'bg-cyan-500/5');
+    if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+        uploadFileList(e.dataTransfer.files);
+    }
+}
+
+function handleFileUpload(e) {
+    if (e.target && e.target.files && e.target.files.length > 0) {
+        uploadFileList(e.target.files);
+        e.target.value = '';
+    }
+}
+
+async function uploadFileList(files) {
+    if (!window.currentBrowserPath) {
+        alert('Please select a storage root before uploading files.');
+        return;
+    }
+
+    const progressDiv = document.getElementById('file-upload-progress');
+    const progressBar = document.getElementById('file-progress-bar');
+    const progressLabel = document.getElementById('file-progress-label');
+    const progressPercent = document.getElementById('file-progress-percent');
+
+    if (progressDiv) progressDiv.classList.remove('hidden');
+
+    let totalUploaded = 0;
+    const totalFiles = files.length;
+
+    for (let i = 0; i < totalFiles; i++) {
+        const file = files[i];
+        if (progressLabel) progressLabel.textContent = `Uploading ${file.name} (${i + 1}/${totalFiles})...`;
+
+        const formData = new FormData();
+        formData.append('destination', window.currentBrowserPath);
+        formData.append('file', file);
+
+        try {
+            const response = await fetch(`${API_BASE}/files/upload`, {
+                method: 'POST',
+                body: formData
+            });
+
+            if (!response.ok) {
+                const err = await response.json();
+                console.error(`Upload error for ${file.name}:`, err);
+            } else {
+                totalUploaded++;
+            }
+        } catch (e) {
+            console.error(`Upload failed for ${file.name}:`, e);
+        }
+
+        const pct = Math.round(((i + 1) / totalFiles) * 100);
+        if (progressBar) progressBar.style.width = `${pct}%`;
+        if (progressPercent) progressPercent.textContent = `${pct}%`;
+    }
+
+    showToast('Upload Complete', `Uploaded ${totalUploaded} of ${totalFiles} file(s) successfully.`, 'success');
+
+    setTimeout(() => {
+        if (progressDiv) progressDiv.classList.add('hidden');
+        if (progressBar) progressBar.style.width = '0%';
+        if (progressPercent) progressPercent.textContent = '0%';
+        loadFiles(window.currentBrowserPath);
+    }, 1000);
+}
+
+// ==================== SYSTEM AUDIT & LOGS ====================
+let currentLogView = 'audit';
+let cachedAuditLogs = [];
+
+function switchLogView(mode) {
+    currentLogView = mode;
+    const auditView = document.getElementById('audit-logs-view');
+    const journalView = document.getElementById('system-journal-view');
+    const modeSelect = document.getElementById('log-view-mode');
+
+    if (modeSelect) modeSelect.value = mode;
+
+    if (mode === 'audit') {
+        if (auditView) auditView.classList.remove('hidden');
+        if (journalView) journalView.classList.add('hidden');
+        loadAuditLogs();
+    } else {
+        if (auditView) auditView.classList.add('hidden');
+        if (journalView) journalView.classList.remove('hidden');
+        loadSystemJournal();
+    }
+}
+
+async function loadLogs() {
+    if (currentLogView === 'audit') {
+        await loadAuditLogs();
+    } else {
+        await loadSystemJournal();
+    }
+}
+
+async function refreshLogs() {
+    loadLogs();
+}
+
+async function loadAuditLogs() {
+    const list = document.getElementById('audit-logs-list');
+    if (!list) return;
+
+    try {
+        const response = await fetch(`${API_BASE}/logs/audit?limit=250`);
+        if (!response.ok) return;
+        cachedAuditLogs = await response.json();
+        renderAuditLogsList(cachedAuditLogs);
+    } catch (e) {
+        list.innerHTML = `<p class="text-rose-400 text-sm text-center py-8">Failed to load audit logs: ${e.message}</p>`;
+    }
+}
+
+function renderAuditLogsList(logs) {
+    const list = document.getElementById('audit-logs-list');
+    if (!list) return;
+
+    if (!logs || logs.length === 0) {
+        list.innerHTML = '<p class="text-slate-500 text-sm text-center py-8">No audit events recorded yet.</p>';
+        return;
+    }
+
+    const levelColors = {
+        Info: 'text-cyan-400 bg-cyan-500/10 border-cyan-500/20',
+        Warning: 'text-amber-400 bg-amber-500/10 border-amber-500/20',
+        Error: 'text-rose-400 bg-rose-500/10 border-rose-500/20',
+        Security: 'text-purple-400 bg-purple-500/10 border-purple-500/20'
+    };
+
+    let html = '';
+    logs.forEach(log => {
+        const color = levelColors[log.level] || levelColors.Info;
+        const timeStr = new Date(log.timestamp).toLocaleString();
+        html += `
+            <div class="bg-slate-900/60 border border-slate-800 hover:border-slate-700/80 p-3.5 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 transition-all text-xs">
+                <div class="flex items-center space-x-3">
+                    <span class="px-2 py-0.5 rounded-md border font-mono font-bold text-[10px] uppercase ${color}">
+                        ${log.level}
+                    </span>
+                    <span class="text-slate-400 font-mono text-[11px]">${timeStr}</span>
+                    <span class="px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-mono text-[10px]">
+                        ${log.category}
+                    </span>
+                    <span class="font-bold text-white font-mono text-xs">
+                        [${escapeHtml(log.user)}]
+                    </span>
+                </div>
+                <div class="text-slate-300 flex-1 truncate sm:text-right font-mono" title="${escapeHtml(log.message)}">
+                    ${escapeHtml(log.message)}
+                </div>
+            </div>
+        `;
+    });
+
+    list.innerHTML = html;
+}
+
+function filterLogs() {
+    if (currentLogView !== 'audit') return;
+
+    const level = document.getElementById('log-level-filter')?.value || 'all';
+    const category = document.getElementById('log-category-filter')?.value || 'all';
+    const search = document.getElementById('log-search-input')?.value.toLowerCase().trim() || '';
+
+    let filtered = cachedAuditLogs;
+
+    if (level !== 'all') {
+        filtered = filtered.filter(l => l.level && l.level.toLowerCase() === level.toLowerCase());
+    }
+
+    if (category !== 'all') {
+        filtered = filtered.filter(l => l.category && l.category.toLowerCase() === category.toLowerCase());
+    }
+
+    if (search) {
+        filtered = filtered.filter(l =>
+            (l.message && l.message.toLowerCase().includes(search)) ||
+            (l.user && l.user.toLowerCase().includes(search)) ||
+            (l.details && l.details.toLowerCase().includes(search))
+        );
+    }
+
+    renderAuditLogsList(filtered);
+}
+
+async function loadSystemJournal() {
+    const pre = document.getElementById('system-journal-content');
+    if (!pre) return;
+
+    pre.textContent = 'Loading host OS journal output...';
+
+    try {
+        const response = await fetch(`${API_BASE}/logs/system?lines=100`);
+        if (response.ok) {
+            const data = await response.json();
+            if (data.journal && data.journal.length > 0) {
+                pre.textContent = data.journal.join('\n');
+            } else {
+                pre.textContent = 'No host journal lines returned.';
+            }
+        } else {
+            pre.textContent = 'Failed to load host journal.';
+        }
+    } catch (e) {
+        pre.textContent = `Error: ${e.message}`;
+    }
+}
+
+// ==================== CONTAINER RUNTIME LOGS ====================
+async function showContainerLogs(pluginId, pluginName) {
+    const modal = document.getElementById('container-logs-modal');
+    const title = document.getElementById('container-logs-title');
+    const content = document.getElementById('container-logs-content');
+
+    if (!modal || !content) return;
+
+    title.textContent = `Runtime Logs: ${pluginName} (${pluginId})`;
+    content.textContent = 'Fetching container logs from Docker daemon...';
+    modal.classList.remove('hidden');
+
+    try {
+        const response = await fetch(`${API_BASE}/plugins/${encodeURIComponent(pluginId)}/logs`);
+        if (response.ok) {
+            const data = await response.json();
+            content.textContent = data.logs || 'No log output captured from container.';
+        } else {
+            content.textContent = 'Failed to retrieve container logs.';
+        }
+    } catch (e) {
+        content.textContent = `Error: ${e.message}`;
+    }
+}
+
+function hideContainerLogs() {
+    const modal = document.getElementById('container-logs-modal');
+    if (modal) modal.classList.add('hidden');
+}
+
+// ==================== STRING ESCAPING UTILITY ====================
+function escapeHtml(str) {
+    if (!str) return '';
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
 
 

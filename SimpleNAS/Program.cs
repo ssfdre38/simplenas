@@ -4,10 +4,23 @@ using Microsoft.Extensions.FileProviders;
 using System.Security.Cryptography;
 using System.Text;
 using System.Runtime.InteropServices;
+using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.AspNetCore.Mvc;
 using SimpleNAS;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddHostedService<SnapshotSchedulerService>();
+builder.Services.AddHostedService<TelemetryStreamingService>();
+builder.Services.AddSignalR();
+
+// Native rate limiting on authentication attempts
+builder.Services.AddRateLimiter(options => {
+    options.AddFixedWindowLimiter("login-limiter", opt => {
+        opt.PermitLimit = 15;
+        opt.Window = TimeSpan.FromMinutes(1);
+    });
+});
+
 var defaultUrl = Environment.GetEnvironmentVariable("ASPNETCORE_URLS") ?? "http://0.0.0.0:8000";
 builder.WebHost.UseUrls(defaultUrl);
 
@@ -46,6 +59,7 @@ builder.Environment.WebRootPath = Path.Combine(builder.Environment.ContentRootPa
 var app = builder.Build();
 
 app.UseSession(); // Enable session middleware
+app.UseRateLimiter(); // Enable rate limiter
 
 // Configure static files - serve login.html without auth
 var staticFileOptions = new StaticFileOptions
@@ -57,17 +71,20 @@ var staticFileOptions = new StaticFileOptions
 app.UseDefaultFiles(); // Must come BEFORE UseStaticFiles()
 app.UseStaticFiles(staticFileOptions);
 
-// Simple auth middleware - check all /api requests except /api/auth/login, allow ACME challenge
+app.MapHub<NasHub>("/hubs/nas");
+
+// Simple auth middleware - check all /api requests except login/status, allow ACME challenge and SignalR hubs
 app.Use(async (context, next) =>
 {
-    if (context.Request.Path.StartsWithSegments("/.well-known"))
+    if (context.Request.Path.StartsWithSegments("/.well-known") || context.Request.Path.StartsWithSegments("/hubs"))
     {
         await next();
         return;
     }
 
     if (context.Request.Path.StartsWithSegments("/api") && 
-        !context.Request.Path.StartsWithSegments("/api/auth/login"))
+        !context.Request.Path.StartsWithSegments("/api/auth/login") &&
+        !context.Request.Path.StartsWithSegments("/api/auth/status"))
     {
         var authenticated = context.Session.GetString("authenticated");
         if (authenticated != "true")
@@ -1227,6 +1244,127 @@ app.MapPost("/api/cloud/sync", () =>
     return Results.Ok(new { success = true });
 });
 
+// ==================== REAL-TIME S.M.A.R.T. TELEMETRY ====================
+app.MapGet("/api/storage/smart", () => Results.Ok(DiskHealthService.GetCachedDiskHealth()));
+
+// ==================== WEB FILE MANAGER ====================
+app.MapGet("/api/files/roots", () => Results.Ok(FileManagerService.GetRootPaths()));
+
+app.MapGet("/api/files/list", (string? path) => 
+{
+    try
+    {
+        return Results.Ok(FileManagerService.ListDirectory(path));
+    }
+    catch (Exception ex)
+    {
+        return Results.BadRequest(new { error = ex.Message });
+    }
+});
+
+app.MapPost("/api/files/upload", async (HttpRequest request) => 
+{
+    if (!request.HasFormContentType) return Results.BadRequest(new { error = "Invalid form submission." });
+    var form = await request.ReadFormAsync();
+    var dest = form["destination"].ToString();
+    var files = form.Files;
+    if (files.Count == 0) return Results.BadRequest(new { error = "No files uploaded." });
+
+    await FileManagerService.UploadFilesAsync(dest, files);
+    LogViewerService.Record("Info", "File", "admin", $"Uploaded {files.Count} files to '{dest}'");
+    return Results.Ok(new { success = true, count = files.Count });
+});
+
+app.MapGet("/api/files/download", (string path) => 
+{
+    if (!File.Exists(path)) return Results.NotFound(new { error = "File not found" });
+    var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+    var ext = Path.GetExtension(path);
+    var mime = FileManagerService.GetMimeType(ext);
+    var filename = Path.GetFileName(path);
+    return Results.File(stream, mime, filename);
+});
+
+app.MapPost("/api/files/mkdir", (CreateFolderRequest req) => 
+{
+    try
+    {
+        FileManagerService.CreateDirectory(req.ParentDir, req.Name);
+        LogViewerService.Record("Info", "File", "admin", $"Created folder '{req.Name}' in '{req.ParentDir}'");
+        return Results.Ok(new { success = true });
+    }
+    catch (Exception ex)
+    {
+        return Results.BadRequest(new { error = ex.Message });
+    }
+});
+
+app.MapDelete("/api/files/delete", ([FromBody] DeleteFileRequest? req, string? path) => 
+{
+    var targetPath = req?.Path ?? path;
+    if (string.IsNullOrWhiteSpace(targetPath)) return Results.BadRequest(new { error = "Target path is required." });
+    try
+    {
+        FileManagerService.DeleteItem(targetPath);
+        LogViewerService.Record("Warning", "File", "admin", $"Deleted '{targetPath}'");
+        return Results.Ok(new { success = true });
+    }
+    catch (Exception ex)
+    {
+        return Results.BadRequest(new { error = ex.Message });
+    }
+});
+
+app.MapPost("/api/files/rename", (RenameFileRequest req) => 
+{
+    try
+    {
+        FileManagerService.RenameItem(req.SourcePath, req.NewName);
+        LogViewerService.Record("Info", "File", "admin", $"Renamed '{req.SourcePath}' to '{req.NewName}'");
+        return Results.Ok(new { success = true });
+    }
+    catch (Exception ex)
+    {
+        return Results.BadRequest(new { error = ex.Message });
+    }
+});
+
+app.MapGet("/api/files/preview", async (string path) => 
+{
+    try
+    {
+        var content = await FileManagerService.ReadTextPreviewAsync(path);
+        return Results.Ok(new { content });
+    }
+    catch (Exception ex)
+    {
+        return Results.BadRequest(new { error = ex.Message });
+    }
+});
+
+// ==================== SYSTEM AUDIT & LOGS ====================
+app.MapGet("/api/logs/audit", (string? level, string? category, string? search, int? limit) => 
+{
+    return Results.Ok(LogViewerService.GetAuditLogs(level, category, search, limit ?? 150));
+});
+
+app.MapGet("/api/logs/system", (int? lines) => 
+{
+    return Results.Ok(new { journal = LogViewerService.GetSystemJournal(lines ?? 80) });
+});
+
+// ==================== EXTENDED DOCKER PLUGIN ENDPOINTS ====================
+app.MapGet("/api/plugins/docker-status", () => 
+{
+    var available = PluginManager.IsDockerAvailable(out var version);
+    return Results.Ok(new { available, version });
+});
+
+app.MapGet("/api/plugins/{id}/logs", (string id) => 
+{
+    return Results.Ok(new { logs = PluginManager.GetContainerLogs(id) });
+});
+
 Console.WriteLine("SimpleNAS running on http://0.0.0.0:8000");
 Console.WriteLine("Default login: admin / SimpleNAS2026");
 app.Run();
@@ -1417,4 +1555,8 @@ record PluginInstallRequest(string Id);
 record PluginToggleRequest(string Id, bool Enabled);
 record PluginConfigRequest(string Id, int? Port, Dictionary<string, string>? Settings);
 record AdminResetPasswordRequest(string NewPassword);
+record CreateFolderRequest(string ParentDir, string Name);
+record DeleteFileRequest(string Path);
+record RenameFileRequest(string SourcePath, string NewName);
+
 

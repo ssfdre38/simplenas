@@ -267,6 +267,24 @@ public static class SystemTelemetry
     }
 
     // ==================== DISK FORMATTER ====================
+    public record TelemetrySnapshot(
+        string Platform,
+        string OsDescription,
+        double Cpu,
+        double Memory,
+        string Disk
+    );
+
+    public static TelemetrySnapshot GetLiveTelemetry()
+    {
+        var platform = OperatingSystem.IsWindows() ? "windows" : (OperatingSystem.IsLinux() ? "linux" : "macos");
+        var osDesc = RuntimeInformation.OSDescription;
+        var cpu = GetCpuPercent();
+        var mem = GetMemoryPercent();
+        var disk = GetDiskPercent();
+        return new TelemetrySnapshot(platform, osDesc, cpu, mem, disk);
+    }
+
     public static string FormatBytes(long bytes)
     {
         if (bytes < 0) bytes = 0;
